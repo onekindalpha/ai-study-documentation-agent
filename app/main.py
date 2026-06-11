@@ -1565,6 +1565,13 @@ def has_text_assisted_context(raw_text: str, memo: str) -> bool:
         "coder",
         "designer",
         "자동화",
+        "microsoft foundry",
+        "mslearn-agent-quickstart",
+        "develop your first agent with microsoft",
+        "get-started-in-foundry",
+        "continue-in-vscode",
+        "use-agent",
+        "first agent",
     ]
     return any(term in lowered for term in helpful_terms)
 
@@ -1581,6 +1588,21 @@ def build_text_assisted_solution_steps(article_type: str, raw_text: str, memo: s
         return []
     source = f"{raw_text}\n{memo}"
     lowered = source.lower()
+
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        return [
+            {
+                "step": idx,
+                "title": step["title"],
+                "problem": step["problem"],
+                "cause": "Microsoft Foundry quickstart 자료는 포털 생성, VS Code 전환, agent 실행 단서가 함께 나타나므로 각 단계의 역할을 분리해야 한다.",
+                "action": step["action"],
+                "verification": step["verification"],
+                "technical_entities": ["Microsoft Foundry", "first agent", "quickstart", "VS Code"],
+                "image_refs": [],
+            }
+            for idx, step in enumerate(microsoft_foundry_first_agent_steps(), start=1)
+        ]
 
     if "azure devops" in lowered and "mcp" in lowered:
         return [
@@ -1670,10 +1692,7 @@ def build_text_assisted_solution_steps(article_type: str, raw_text: str, memo: s
             },
         ]
 
-    if article_type in GITHUB_WORKFLOW_TYPES or any(
-        term in lowered
-        for term in ["agentic workflows", "github actions", "workflow_dispatch", "pull request", "update-github-info", "activation", "conclusion"]
-    ):
+    if article_type in GITHUB_WORKFLOW_TYPES or is_github_agentic_context(raw_text, memo):
         return [
             {
                 "step": 1,
@@ -1719,35 +1738,16 @@ def build_text_assisted_solution_steps(article_type: str, raw_text: str, memo: s
 
     return [
         {
-            "step": 1,
-            "title": "강의안과 URL 기반 주제 복원",
-            "problem": "이미지 해석만으로는 강의 주제를 확정하기 어렵다.",
-            "cause": "캡처가 부족하거나 화면 텍스트가 작아 핵심 맥락이 누락되었다.",
-            "action": "강의안, URL, 사용자가 붙여넣은 텍스트에서 제목, 핵심 개념, 반복 용어를 추출한다.",
-            "verification": "추출한 주제가 사용자의 메모와 캡처 단서에 맞는지 확인한다.",
-            "technical_entities": ["lecture note", "source URL", "topic recovery"],
+            "step": idx,
+            "title": step["title"],
+            "problem": step["problem"],
+            "cause": "현재 source pack 안의 제목, URL, 반복 용어만으로 학습 흐름을 재구성해야 한다.",
+            "action": step["action"],
+            "verification": step["verification"],
+            "technical_entities": source_derived_terms(raw_text, memo, limit=5),
             "image_refs": [],
-        },
-        {
-            "step": 2,
-            "title": "헷갈린 개념과 작업 흐름 분리",
-            "problem": "사용자가 무엇을 이해했고 무엇을 헷갈렸는지 한 번에 구분하기 어렵다.",
-            "cause": "강의 내용, 캡처, 사용자 기억이 서로 다른 수준의 근거이기 때문이다.",
-            "action": "확인 가능한 개념, 추정되는 작업 단계, 추가 확인이 필요한 부분을 분리한다.",
-            "verification": "draft_with_missing_context에서 단정한 내용과 질문으로 남긴 내용을 나눠 표시한다.",
-            "technical_entities": ["concept", "workflow", "missing context"],
-            "image_refs": [],
-        },
-        {
-            "step": 3,
-            "title": "학습 복구 초안 생성",
-            "problem": "완성형 포트폴리오 글을 바로 쓰기에는 근거가 부족하다.",
-            "cause": "최종 성공 화면, 사용자가 직접 수행한 조치, 검증 결과가 명확하지 않다.",
-            "action": "완성글 대신 문제 정의 후보, 핵심 개념, 예상 흐름, 추가 질문으로 구성된 복구 초안을 만든다.",
-            "verification": "사용자가 초안의 질문에 답하면 full_article로 승격 가능한지 확인한다.",
-            "technical_entities": ["draft_with_missing_context", "recovery draft", "follow-up questions"],
-            "image_refs": [],
-        },
+        }
+        for idx, step in enumerate(source_derived_generic_steps(raw_text, memo), start=1)
     ]
 
 
@@ -1796,14 +1796,48 @@ def is_azure_devops_mcp_context(raw_text: str, memo: str) -> bool:
     return "azure devops" in source and ("mcp" in source or "model context protocol" in source or "mslearn-devops" in source)
 
 
+def is_microsoft_foundry_first_agent_context(raw_text: str, memo: str) -> bool:
+    source = f"{raw_text}\n{memo}".lower()
+    markers = [
+        "mslearn-agent-quickstart",
+        "develop your first agent with microsoft",
+        "get-started-in-foundry",
+        "continue-in-vscode",
+        "use-agent",
+        "first agent",
+    ]
+    return "microsoft foundry" in source and any(marker in source for marker in markers)
+
+
+def is_foundry_iq_mcp_rag_context(raw_text: str, memo: str) -> bool:
+    source = f"{raw_text}\n{memo}".lower()
+    return "foundry iq" in source and any(
+        marker in source
+        for marker in [
+            "mcp",
+            "model context protocol",
+            "rag",
+            "knowledge base",
+            "azure ai search",
+            "dynamic tool discovery",
+        ]
+    )
+
+
 def is_github_agentic_context(raw_text: str, memo: str) -> bool:
     source = f"{raw_text}\n{memo}".lower()
-    markers = ["github", "agentic workflows", "workflow_dispatch", "pull request", "update-github-info", "github actions"]
-    return sum(1 for marker in markers if marker in source) >= 2
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        return False
+    markers = ["agentic workflows", "workflow_dispatch", "update-github-info", "github actions", ".github/workflows"]
+    has_workflow_marker = any(marker in source for marker in markers)
+    has_github_anchor = "github" in source or ".github/workflows" in source
+    return has_github_anchor and has_workflow_marker
 
 
 def is_agent_orchestration_context(raw_text: str, memo: str) -> bool:
     source = f"{raw_text}\n{memo}".lower()
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        return False
     markers = [
         "agent orchestration",
         "orchestrator",
@@ -1869,13 +1903,20 @@ def can_generate_url_assisted_medium_draft(
     has_problem_or_intent = len(memo.strip()) >= 20 or any(
         token in lowered for token in ["헷갈", "모르", "궁금", "요청", "정리", "medium", "초안", "문제해결"]
     )
-    if is_azure_devops_mcp_context(raw_text, memo) or is_github_agentic_context(raw_text, memo) or is_agent_orchestration_context(raw_text, memo):
+    if (
+        is_microsoft_foundry_first_agent_context(raw_text, memo)
+        or is_azure_devops_mcp_context(raw_text, memo)
+        or is_github_agentic_context(raw_text, memo)
+        or is_agent_orchestration_context(raw_text, memo)
+    ):
         return True
     return len(source) >= 450 and (has_source_url or has_lab_or_lecture_text or has_problem_or_intent)
 
 
 def compact_user_intent(raw_text: str, memo: str) -> str:
     lowered = f"{raw_text}\n{memo}".lower()
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        return "Microsoft Foundry에서 첫 agent를 만들고 VS Code로 이어서 실행·테스트하는 실습 흐름을 이해하는 것"
     if is_azure_devops_mcp_context(raw_text, memo):
         return "Azure DevOps MCP Server가 AI assistant와 DevOps 업무 흐름을 어떻게 연결하는지 이해하는 것"
     if is_agent_orchestration_context(raw_text, memo):
@@ -1892,7 +1933,10 @@ def compact_user_intent(raw_text: str, memo: str) -> str:
 def optional_confirmation_items(raw_text: str, memo: str, qa_logs: list[dict[str, Any]] | None = None) -> list[str]:
     qa_logs = qa_logs or []
     items: list[str] = []
-    if is_azure_devops_mcp_context(raw_text, memo):
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        items.append("Foundry 포털에서 생성한 agent와 VS Code에서 이어서 확인한 파일/실행 화면이 있으면 실습 흐름을 더 구체화할 수 있습니다.")
+        items.append("use-agent 단계의 실제 테스트 입력과 응답 결과가 확인되면 검증 기준을 더 명확히 쓸 수 있습니다.")
+    elif is_azure_devops_mcp_context(raw_text, memo):
         items.append("실제로 확인한 마지막 Azure DevOps 결과 화면이 work item, pull request, build 중 무엇인지 알면 성과 섹션을 더 구체화할 수 있습니다.")
         items.append("영상 2개의 정확한 순서나 제목이 확인되면 강의 흐름을 더 자연스럽게 다듬을 수 있습니다.")
     elif is_agent_orchestration_context(raw_text, memo):
@@ -2077,6 +2121,89 @@ def practical_problem_steps_for_topic(kind: str) -> list[dict[str, str]]:
         ]
     return []
 
+
+def source_derived_terms(raw_text: str, memo: str, limit: int = 8) -> list[str]:
+    source = f"{raw_text}\n{memo}"
+    preferred = [
+        "Microsoft Foundry",
+        "first agent",
+        "VS Code",
+        "continue-in-vscode",
+        "get-started-in-foundry",
+        "use-agent",
+        "agent",
+        "lab",
+        "setup",
+        "validation",
+    ]
+    found = [term for term in preferred if term.lower() in source.lower()]
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9_.-]{2,}|[가-힣][가-힣A-Za-z0-9_.-]{1,}", source)
+    skip = {"https", "http", "www", "com", "learn", "github", "microsoft", "사용자", "강의", "실습", "자료", "화면"}
+    for token in tokens:
+        cleaned = token.strip(".,:;()[]{}<>`\"'")
+        if cleaned.lower() in skip or len(cleaned) < 3:
+            continue
+        if cleaned not in found:
+            found.append(cleaned)
+        if len(found) >= limit:
+            break
+    return found[:limit] or ["학습 목표", "실습 흐름", "도구 역할", "검증 기준"]
+
+
+def source_derived_generic_steps(raw_text: str, memo: str) -> list[dict[str, str]]:
+    terms = source_derived_terms(raw_text, memo, limit=6)
+    primary = terms[0] if terms else "핵심 주제"
+    secondary = terms[1] if len(terms) > 1 else "실습 단계"
+    return [
+        {
+            "title": "자료에서 학습 목표와 범위 분리",
+            "problem": f"{primary}의 목표와 {secondary}의 역할이 한 흐름 안에서 바로 구분되지 않았다.",
+            "action": "현재 source pack에 실제로 등장한 제목, URL, 단계명, 반복 용어만 추려 학습 범위를 좁혔다.",
+            "verification": "정리한 제목과 키워드가 현재 자료에 없는 다른 주제의 용어를 끌어오지 않는지 확인했다.",
+        },
+        {
+            "title": "개념 경계와 파일/도구 역할 정리",
+            "problem": "개념 설명, 실습 지시, 도구 실행 단계가 섞여 있어 각 항목의 역할이 흐릿했다.",
+            "action": f"{', '.join(terms[:4])} 같은 현재 자료의 단서를 기준으로 개념, 파일, 도구, 실행 단계를 나누어 보았다.",
+            "verification": "각 용어가 실습에서 무엇을 만들거나 확인하는 데 쓰이는지 한 문장으로 설명할 수 있는지 확인했다.",
+        },
+        {
+            "title": "실습 흐름과 검증 기준 연결",
+            "problem": "마지막에 무엇이 성공 기준인지 모호하면 학습 결과를 확정하기 어렵다.",
+            "action": "자료에 남은 setup, 실행, 테스트, 결과 확인 단서를 순서대로 재배치하고 확인 가능한 기준만 남겼다.",
+            "verification": "없는 성공 화면이나 다른 강의의 절차를 섞지 않고, 현재 source pack에서 뒷받침되는 단계만 사용했다.",
+        },
+    ]
+
+
+def microsoft_foundry_first_agent_steps() -> list[dict[str, str]]:
+    return [
+        {
+            "title": "Foundry 실습 환경과 시작 위치 확인",
+            "problem": "Microsoft Foundry 안에서 어디서 실습을 시작하고 어떤 준비가 필요한지 흐름이 불명확했다.",
+            "action": "get-started-in-foundry와 quickstart 단서를 기준으로 실습의 시작점, 프로젝트/리소스 준비, 안내 페이지의 역할을 먼저 분리했다.",
+            "verification": "Foundry에서 첫 agent를 만들기 전 필요한 setup 단계와 진입 경로를 설명할 수 있는지 확인했다.",
+        },
+        {
+            "title": "첫 Agent 생성 단계 이해",
+            "problem": "agent 생성 화면이 단순 템플릿 선택인지, 실제 동작할 agent 구성을 만드는 단계인지 헷갈릴 수 있었다.",
+            "action": "first agent 생성 단계에서 이름, 지시문, 연결된 리소스, 기본 실행 설정이 어떤 역할을 하는지 현재 자료의 순서대로 정리했다.",
+            "verification": "생성된 agent가 어떤 입력을 받고 어떤 방식으로 응답해야 하는지 설명할 수 있는지 확인했다.",
+        },
+        {
+            "title": "VS Code continuation 역할 구분",
+            "problem": "continue-in-vscode가 선택 옵션인지, 이후 실습을 코드 환경에서 이어 가기 위한 전환점인지 분명하지 않았다.",
+            "action": "Foundry 포털에서 만든 agent 흐름과 VS Code에서 이어지는 파일/도구 역할을 분리해 정리했다.",
+            "verification": "포털에서 하는 일과 VS Code에서 이어서 확인하거나 수정하는 일을 구분할 수 있는지 확인했다.",
+        },
+        {
+            "title": "Agent 사용과 테스트 기준 확인",
+            "problem": "use-agent 단계에서 무엇을 테스트해야 성공으로 볼 수 있는지 기준이 흐릿했다.",
+            "action": "agent 실행, 입력 테스트, 응답 확인, 오류 여부 확인처럼 자료가 뒷받침하는 검증 단서만 남겼다.",
+            "verification": "agent를 사용해 본 결과가 기대한 응답, 실행 가능 상태, 다음 수정 지점 중 무엇을 보여 주는지 확인했다.",
+        },
+    ]
+
 def build_url_assisted_medium_draft(
     article_type: str,
     raw_text: str,
@@ -2094,9 +2221,10 @@ def build_url_assisted_medium_draft(
     """
     qa_logs = qa_logs or []
     source = f"{raw_text}\n{memo}"
+    foundry_first_agent = is_microsoft_foundry_first_agent_context(raw_text, memo)
     azure = is_azure_devops_mcp_context(raw_text, memo)
-    agent_orch = is_agent_orchestration_context(raw_text, memo) and not azure
-    github = is_github_agentic_context(raw_text, memo) and not azure and not agent_orch
+    agent_orch = is_agent_orchestration_context(raw_text, memo) and not azure and not foundry_first_agent
+    github = is_github_agentic_context(raw_text, memo) and not azure and not agent_orch and not foundry_first_agent
     steps = problem_map.get("solution_steps", []) if isinstance(problem_map.get("solution_steps"), list) else []
     if not steps:
         steps = build_text_assisted_solution_steps(article_type, raw_text, memo)
@@ -2104,7 +2232,10 @@ def build_url_assisted_medium_draft(
     # Job-seeker blog fallback: if the learner did not explicitly ask a hard question,
     # pick the most practical/complex concept from the topic and write the learning
     # record as if that concept was the problem being resolved.
-    if azure:
+    if foundry_first_agent:
+        if not steps or sum(not is_weak_learning_step(step) for step in steps[:4]) < 2:
+            steps = microsoft_foundry_first_agent_steps()
+    elif azure:
         if not steps or sum(not is_weak_learning_step(step) for step in steps[:4]) < 2:
             steps = practical_problem_steps_for_topic("azure_mcp")
     elif agent_orch:
@@ -2125,7 +2256,20 @@ def build_url_assisted_medium_draft(
             if isinstance(step, dict)
         ]
 
-    if azure:
+    if foundry_first_agent:
+        title = "Microsoft Foundry 첫 Agent 실습: 생성·VS Code 연동·실행 흐름 이해하기"
+        subtitle = "Understanding first-agent creation, VS Code continuation, and lab validation"
+        core_problem = "Microsoft Foundry quickstart에서 agent 생성, VS Code continuation, use-agent 실행 단계의 경계와 검증 기준을 이해하는 것이 핵심 문제였다."
+        key_terms = ["Microsoft Foundry", "first agent", "quickstart", "setup", "VS Code", "continue-in-vscode", "use-agent", "validation"]
+        final_result = "Microsoft Foundry에서 첫 agent를 만들고, VS Code로 이어서 확인하며, use-agent 단계에서 실행과 테스트 기준을 분리해 정리했다."
+        skills = [
+            "Reading Microsoft Foundry quickstart instructions",
+            "Separating setup, creation, continuation, and test steps",
+            "Understanding first-agent lab flow",
+            "Mapping Foundry portal work to VS Code continuation",
+            "Defining practical validation criteria",
+        ]
+    elif azure:
         title = "Azure DevOps MCP Server 실습: AI assistant와 DevOps 업무 흐름 이해하기"
         subtitle = "Understanding how MCP connects AI assistants with Azure DevOps workflows"
         core_problem = "MCP Server가 Azure DevOps와 AI assistant 사이에서 어떤 역할을 하며, 실습 단계가 어떤 DevOps 업무 자동화 흐름으로 이어지는지 이해하는 것이 핵심 문제였다."
@@ -2165,12 +2309,13 @@ def build_url_assisted_medium_draft(
             "Documenting GitHub automation learning for developer portfolios",
         ]
     else:
-        title = "기술 학습 기록: 핵심 개념을 실무 흐름으로 이해하기"
-        subtitle = "Connecting technical concepts with practical developer workflows"
+        derived_terms = source_derived_terms(raw_text, memo)
+        title = f"{derived_terms[0]} 학습 기록: 개념 경계와 실습 흐름 정리하기"
+        subtitle = "Clarifying concept boundaries, lab flow, tool roles, and validation criteria"
         core_problem = f"{compact_user_intent(raw_text, memo)}이 핵심 문제였다."
-        key_terms = normalize_str_list(problem_map.get("key_terms")) or ["core concept", "workflow", "validation", "practical use"]
-        final_result = "핵심 개념을 실무 흐름 안에서 해석하고, 왜 중요한지와 어떤 기준으로 이해했는지 정리했다."
-        skills = ["Understanding technical concepts", "Connecting concepts to workflow", "Writing practical learning notes"]
+        key_terms = normalize_str_list(problem_map.get("key_terms")) or derived_terms
+        final_result = "현재 source pack에 있는 단서만 사용해 개념 경계, 실습 순서, 파일/도구 역할, 확인 기준을 분리했다."
+        skills = ["Clarifying concept boundaries", "Reconstructing lab flow from source text", "Separating tool roles and validation criteria"]
 
     urls = extract_urls_from_text(source)
     url_lines = "\n".join(f"- {url}" for url in urls[:6]) or "- 강의 캡처 및 학습 메모"
@@ -2182,7 +2327,9 @@ def build_url_assisted_medium_draft(
     lines.append(f"_{subtitle}_")
     lines.append("")
     lines.append("## 짧은 도입부")
-    if azure:
+    if foundry_first_agent:
+        lines.append("이번 실습은 Microsoft Foundry에서 첫 agent를 만들고, VS Code로 이어서 작업 흐름을 확인한 뒤, use-agent 단계에서 실행과 테스트 기준을 잡는 과정으로 보았다. 핵심은 Foundry라는 이름만 보고 다른 주제로 넓히는 것이 아니라, quickstart 자료에 실제로 남아 있는 setup, agent 생성, continuation, 사용/검증 단서를 순서대로 이해하는 것이었다.")
+    elif azure:
         lines.append("이번 실습은 Azure DevOps MCP Server가 AI assistant와 DevOps 업무 흐름을 어떻게 연결하는지 이해하는 데서 출발했다. MCP Server를 단순한 서버 설정이 아니라, AI가 work item, pull request, build 같은 DevOps 리소스에 접근하고 업무 맥락을 다룰 수 있게 하는 연결 계층으로 이해하는 것이 핵심이었다.")
     elif agent_orch:
         lines.append("이번 학습은 단일 챗봇이 모든 요청을 처리하는 방식과, orchestrator가 여러 sub-agent를 조율하는 방식의 차이를 이해하는 데서 출발했다. Agent Orchestration은 단순히 AI를 여러 번 호출하는 구조가 아니라, planner, coder, designer처럼 역할을 나누고 toolchain을 통해 개발 workflow를 분담하는 방식으로 볼 수 있었다.")
@@ -2204,7 +2351,11 @@ def build_url_assisted_medium_draft(
     lines.append(url_lines)
     lines.append("")
     lines.append("## 문제 인식")
-    if azure:
+    if foundry_first_agent:
+        lines.append("처음 헷갈린 지점은 Foundry 포털에서 agent를 만드는 단계와 VS Code로 이어서 확인하는 단계의 경계였다. 같은 quickstart 안에 setup, 생성, continuation, 실행 테스트가 이어지기 때문에 각 단계가 무엇을 준비하고 무엇을 검증하는지 나누어 볼 필요가 있었다.")
+        lines.append("")
+        lines.append("중요한 부분은 제품 소개식 설명이 아니라, 학습자가 실습 중 어디서 무엇을 눌렀고 어떤 파일이나 도구가 어떤 역할을 했으며 마지막에 무엇을 확인해야 하는지 잡는 것이었다.")
+    elif azure:
         lines.append("처음 헷갈린 지점은 MCP Server의 위치였다. 이름만 보면 별도의 서버를 실행하는 설정 실습처럼 보이지만, 실제 핵심은 AI assistant가 Azure DevOps의 work item, pull request, build 같은 리소스를 업무 맥락 안에서 다룰 수 있게 하는 연결 계층이라는 점이었다.")
         lines.append("")
         lines.append("취업 준비 관점에서도 중요한 부분은 도구 이름을 외우는 것이 아니라, 이 구조가 개발·운영 업무에서 반복 조회, 이슈 추적, PR 확인, 빌드 상태 확인 같은 작업을 어떻게 줄일 수 있는지 설명하는 것이다.")
@@ -2218,12 +2369,14 @@ def build_url_assisted_medium_draft(
         lines.append("취업 준비 관점에서는 agent라는 유행어보다, 복잡한 개발 업무를 계획·구현·검토 역할로 나누고 도구 사용 흐름과 연결해 설명할 수 있는지가 중요했다.")
     else:
         lines.append(f"처음 헷갈린 지점은 {core_problem}")
-        lines.append("핵심은 용어를 나열하는 것이 아니라, 그 개념이 어떤 업무 흐름에서 쓰이고 왜 중요한지 설명하는 것이었다.")
+        lines.append("핵심은 현재 자료에 있는 용어만 기준으로 개념 경계, lab flow, 파일/도구 역할, validation criteria를 분리하는 것이었다.")
     lines.append("")
     lines.append("## 문제 정의")
     lines.append(core_problem)
     lines.append("")
-    if azure:
+    if foundry_first_agent:
+        lines.append("이 문제는 Foundry라는 제품명만 보고 해결되지 않는다. 첫 agent를 어디서 만들고, VS Code continuation이 어떤 전환점이며, use-agent 단계에서 무엇을 테스트해야 하는지 흐름과 기준을 분리해야 한다.")
+    elif azure:
         lines.append("이 문제는 MCP Server를 단순 설치 대상으로 보면 해결되지 않는다. AI assistant의 자연어 요청이 Azure DevOps 리소스 접근으로 이어지려면, 중간에서 요청과 업무 데이터를 연결하는 계층을 이해해야 한다.")
     elif github:
         lines.append("이 문제는 workflow 파일을 읽는 것만으로는 해결되지 않는다. trigger, activation, PR, conclusion을 각각 분리하고, 자동화 실행 조건과 결과 검증 흐름으로 연결해야 한다.")
@@ -2233,22 +2386,20 @@ def build_url_assisted_medium_draft(
         lines.append("이 문제는 개념 정의만 외우는 것으로 해결되지 않는다. 핵심 개념을 업무 흐름, 조치, 확인 기준과 연결해야 한다.")
     lines.append("")
     lines.append("## 왜 이것을 문제로 인식했는가")
-    if azure:
+    if foundry_first_agent:
+        lines.append("실습형 자료에서는 개념 이름보다 단계 경계가 더 자주 막힌다. setup, Foundry 포털의 agent 생성, VS Code로 이어지는 작업, use-agent 실행 확인을 구분해야 어떤 부분을 이해했고 어디를 다시 검증해야 하는지 알 수 있다.")
+    elif azure:
         lines.append("AI assistant가 실제 업무 도구와 연결되지 않으면 답변 생성에 머물지만, MCP Server를 통해 Azure DevOps 리소스와 연결되면 업무 항목 조회, PR 확인, build 상태 확인처럼 개발·운영 맥락을 다루는 자동화로 확장될 수 있다.")
     elif github:
         lines.append("GitHub 자동화에서 중요한 것은 workflow가 존재한다는 사실이 아니라 언제 실행되고, 어떤 변경을 만들고, 결과를 어디서 확인하는지다. workflow_dispatch, PR, conclusion을 연결해 보아야 자동화 흐름을 설명할 수 있다.")
     elif agent_orch:
         lines.append("실무형 AI 활용은 하나의 답변을 잘 받는 것에서 끝나지 않는다. 복잡한 작업을 계획, 구현, 검토 단위로 쪼개고 각 역할에 맞는 agent와 toolchain을 배치할 수 있어야 개발 workflow로 확장된다.")
     else:
-        lines.append("기술 학습을 포트폴리오로 남기려면 개념의 정의뿐 아니라 왜 그 개념이 실무적으로 중요한지, 어떤 문제를 줄이는지까지 연결해야 한다.")
+        lines.append("학습자가 막히는 지점은 대개 용어 자체보다 개념 경계, 실습 순서, 파일/도구 역할, 검증 기준이 한 번에 섞이는 데서 나온다. 그래서 현재 자료에서 확인되는 단서만으로 무엇을 했고 무엇을 확인해야 하는지 분리했다.")
     lines.append("")
     lines.append("## 문제 해결 경험")
     if not steps:
-        steps = [
-            {"title": "실무에서 중요한 핵심 개념 선정", "problem": "별도의 오류가 없더라도 실무에서 중요한 개념은 왜 필요한지와 어떤 문제를 줄이는지 이해할 필요가 있었다.", "action": "자료에서 반복적으로 등장하는 기술 용어 중 가장 복잡하거나 업무 활용도가 높은 개념을 중심 문제로 정했다.", "verification": "해당 개념을 왜 중요한지, 어떤 흐름에서 쓰이는지, 어떤 기준으로 이해했는지 설명할 수 있는지 확인했다."},
-            {"title": "개념을 업무 흐름 안에서 해석", "problem": "기술 용어를 정의만 외우면 실제 개발·운영 업무와 연결하기 어렵다.", "action": "핵심 개념을 입력, 처리, 결과 확인 흐름으로 나누어 정리했다.", "verification": "개념 설명이 단순 정의가 아니라 실무 사용 장면과 연결되는지 확인했다."},
-            {"title": "포트폴리오용 학습 결과 정리", "problem": "학습 내용을 단순 용어 암기로 남기면 실제 업무 흐름과 연결하기 어렵다.", "action": "헷갈렸던 지점, 이해한 구조, 확인 기준을 나누어 실제 업무 흐름과 연결했다.", "verification": "내가 무엇을 이해했고 왜 그 개념이 중요한지 설명할 수 있는지 확인했다."},
-        ]
+        steps = source_derived_generic_steps(raw_text, memo)
     for idx, step in enumerate(steps[:6], start=1):
         if not isinstance(step, dict):
             continue
@@ -2280,7 +2431,18 @@ def build_url_assisted_medium_draft(
     lines.append("확인되지 않은 성공 결과를 임의로 넣기보다, 현재 자료에서 설명 가능한 개념·흐름·확인 기준을 중심으로 정리했다.")
     lines.append("")
     lines.append("## 사용한 주요 개념 정리")
-    if azure:
+    if foundry_first_agent:
+        concept_descriptions = {
+            "Microsoft Foundry": "첫 agent를 만들고 실행 흐름을 확인하는 실습의 중심 환경이다.",
+            "first agent": "quickstart에서 생성하고 테스트해야 하는 기본 agent 결과물이다.",
+            "quickstart": "setup부터 생성, continuation, 실행 확인까지의 최소 실습 흐름이다.",
+            "setup": "agent를 만들기 전에 필요한 준비 단계와 진입 경로를 의미한다.",
+            "VS Code": "Foundry 포털 이후 실습을 이어서 확인하거나 수정하는 개발 환경이다.",
+            "continue-in-vscode": "포털 중심 작업에서 코드 환경으로 넘어가는 전환 단계다.",
+            "use-agent": "생성한 agent를 실제로 실행하고 응답을 확인하는 검증 단계다.",
+            "validation": "agent가 실행 가능한 상태인지, 테스트 입력에 기대한 방식으로 응답하는지 확인하는 기준이다.",
+        }
+    elif azure:
         concept_descriptions = {
             "Azure DevOps MCP Server": "AI assistant와 Azure DevOps 리소스 사이를 연결해 자연어 요청이 work item, pull request, build 같은 업무 데이터 접근으로 이어지도록 돕는 계층이다.",
             "AI assistant": "단순 답변 생성 도구가 아니라 MCP 연결을 통해 DevOps 업무 맥락을 조회하고 작업 흐름을 보조할 수 있는 인터페이스로 이해했다.",
@@ -2318,7 +2480,9 @@ def build_url_assisted_medium_draft(
         lines.append(f"- **{term}**: {desc}")
     lines.append("")
     lines.append("## 최종 정리")
-    if azure:
+    if foundry_first_agent:
+        lines.append("이번 실습을 통해 Microsoft Foundry first-agent quickstart를 setup, Foundry에서의 agent 생성, VS Code continuation, use-agent 실행 확인으로 나누어 이해했다. 이 흐름을 분리하니 각 단계가 어떤 역할을 하며 무엇을 기준으로 성공 여부를 확인해야 하는지 더 분명해졌다.")
+    elif azure:
         lines.append("이번 실습을 통해 Azure DevOps MCP Server를 AI assistant와 DevOps 리소스를 연결하는 계층으로 이해했다. MCP Server가 work item, pull request, build 같은 업무 데이터를 AI assistant가 다룰 수 있게 해 주기 때문에, DevOps 자동화는 단순 명령 실행이 아니라 업무 맥락을 이해하고 요청을 처리하는 흐름으로 확장될 수 있다.")
     elif agent_orch:
         lines.append("이번 학습을 통해 Agent Orchestration을 단일 챗봇보다 확장된 역할 기반 AI 협업 구조로 이해했다. orchestrator는 전체 목표와 흐름을 조율하고, planner, coder, designer 같은 sub-agent는 각자의 역할에 맞게 작업을 나누어 수행한다. 이를 통해 AI 개발 workflow를 하나의 응답 생성이 아니라 역할 분담과 도구 사용이 결합된 구조로 볼 수 있었다.")
@@ -2328,7 +2492,9 @@ def build_url_assisted_medium_draft(
         lines.append("이번 학습에서는 강의 자료와 실습 단서에 흩어진 개념을 하나의 학습 흐름으로 정리했다. 핵심 개념, 실습 단계, 확인이 필요한 부분을 분리하면서 이후 같은 내용을 다시 설명할 수 있는 기술 학습 기록으로 만들었다.")
     lines.append("")
     lines.append("## Portfolio Summary")
-    if azure:
+    if foundry_first_agent:
+        lines.append("This learning record summarizes a Microsoft Foundry first-agent quickstart by separating setup, agent creation, VS Code continuation, use-agent execution, and validation criteria.")
+    elif azure:
         lines.append("This learning record explains how Azure DevOps MCP Server connects AI assistants with DevOps resources such as work items, pull requests, and builds. The focus is on understanding MCP as a workflow-enabling layer rather than a simple setup task.")
     elif agent_orch:
         lines.append("This learning record summarizes Agent Orchestration as a role-based AI workflow. It connects the concepts of orchestrators, sub-agents, toolchains, and GitHub Copilot CLI to explain how AI-assisted development can move beyond a single chatbot interaction.")
@@ -3437,6 +3603,7 @@ SUPPORTED_ARTICLE_TYPES = [
     "github_agentic_workflow",
     "github_actions_workflow",
     "ai_coding_workflow",
+    "microsoft_foundry_first_agent",
     "github_readme_debugging",
     "deployment_debugging",
     "cloud_lab_practice",
@@ -3513,6 +3680,15 @@ ARTICLE_TYPE_KEYWORDS = {
         "conclusion",
     ],
     "ai_coding_workflow": ["copilot", "agent", "automation", "ai coding", "coding agent", "workflow"],
+    "microsoft_foundry_first_agent": [
+        "microsoft foundry",
+        "mslearn-agent-quickstart",
+        "develop your first agent with microsoft",
+        "get-started-in-foundry",
+        "continue-in-vscode",
+        "use-agent",
+        "first agent",
+    ],
     "github_readme_debugging": ["github", "readme", "markdown", "video embed", "image embed", "badge", "repository"],
     "deployment_debugging": ["deploy", "deployment", "build", "hosting", "ci"],
     "cloud_lab_practice": ["aws", "azure", "gcp", "cloud lab", "iam", "s3", "ec2", "lambda", "resource group"],
@@ -3531,6 +3707,8 @@ def promote_article_type_from_evidence(
     image_names: list[str],
 ) -> dict[str, Any]:
     source = " ".join([raw_text, memo, " ".join(image_names), evidence_source_text(evidence)]).lower()
+    if is_microsoft_foundry_first_agent_context(raw_text, memo):
+        return classification
     github_terms = [
         "agentic workflows",
         "automation that actually reads the room",
@@ -3564,6 +3742,19 @@ def classify_article_type(raw_text: str, memo: str, topic: str, extra_info: str,
 def classify_article_type_with_confidence(raw_text: str, memo: str, topic: str, extra_info: str, image_names: list[str]) -> dict[str, Any]:
     source = " ".join([raw_text, memo, topic, extra_info, " ".join(image_names)]).lower()
     compact_source = source.replace(" ", "_").replace("-", "_")
+    classification_text = "\n".join([raw_text, topic, extra_info, " ".join(image_names)])
+    if is_microsoft_foundry_first_agent_context(classification_text, memo):
+        return {
+            "article_type": "microsoft_foundry_first_agent",
+            "confidence": 0.96,
+            "candidates": [{"article_type": "microsoft_foundry_first_agent", "score": 99}],
+        }
+    if is_foundry_iq_mcp_rag_context(classification_text, memo):
+        return {
+            "article_type": "ai_project_build_log",
+            "confidence": 0.78,
+            "candidates": [{"article_type": "ai_project_build_log", "score": 8}],
+        }
     for article_type, example_dir in ARTICLE_TYPE_EXAMPLE_DIRS.items():
         if article_type in compact_source or example_dir in compact_source:
             return {"article_type": article_type, "confidence": 0.98, "candidates": [{"article_type": article_type, "score": 99}]}
