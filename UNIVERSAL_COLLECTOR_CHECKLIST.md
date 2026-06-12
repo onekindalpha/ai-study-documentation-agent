@@ -208,3 +208,12 @@ tools/extractors/
 | Oopy extractor | 6 | Root page TOC detected and collected correctly: 18 TOC candidates, 18 collected, 0 missing, 100% TOC coverage, 0 extra pages outside TOC. |
 | Oopy quality gate | 5 | `toc_candidates`, `toc_collected`, `toc_missing`, `toc_coverage`, and `extra_collected_outside_toc` are now included in quality output. |
 | Oopy limitation | 4 | Image counting currently reflects limited/root evidence and should later aggregate images across TOC pages if needed. |
+
+
+## 2026-06-13 Protected Course Decision
+
+| Area | Score / 10 | Notes |
+|---|---:|---|
+| Inflearn/Udemy protected lecture pages | 3 | v0 intentionally treats protected lecture pages as partial/unsupported unless visible transcript or public curriculum content is available. |
+| Protected course safety behavior | 5 | The collector marks protected lecture pages as partial, records missing transcript/login/enrollment/DRM limitations, and disables article generation. |
+| Product decision | 7 | The app should focus on public learning sources and user-provided study evidence, not bypassing login-only or DRM-protected course content. |

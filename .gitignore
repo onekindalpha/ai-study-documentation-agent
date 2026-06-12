@@ -14,3 +14,4 @@ data/source_runs/
 data/captures/
 tools/extractors/*.before_*
 tools/extractors/*.before_*
+tools/extractors/*.before_*
