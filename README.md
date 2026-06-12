@@ -1,21 +1,10 @@
----
-title: Study Capture Copilot
-emoji: 📚
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Study Capture Copilot
 
 Lecture capture-to-technical blog generation service that turns screenshots, course URLs, lab instructions, and rough notes into problem-solving Medium-style drafts.
 
 ## Demo
 
-- Live Demo: Coming soon
-- Repository: https://github.com/onekindalpha/study-capture-copilot
+- Live Demo: (https://huggingface.co/spaces/onekindalpha/study-capture-copilot)
 
 ## What It Does
 
