@@ -43,10 +43,10 @@ Each item is scored from 1 to 10.
 | Stable image/sample article generation | 8 | Example 1, 2, 3 tested. Existing image-based workflow should be protected. |
 | AI Skills Navigator URL collection | 7 | Tested in separate branch, but not merged into main. Needs isolation from universal collector. |
 | Universal URL collector branch setup | 6 | `feature/universal-learning-source-collector-v0` branch exists and tracks origin. |
-| Universal collector implementation | 1 | Not implemented yet. |
+| Universal collector implementation | 4 | v0 skeleton works for YouTube and Agent Academy smoke tests. |
 | Medium writer role definition | 8 | Learner-perspective problem-solving template is defined, but must be protected in prompts/code. |
-| Visible trace / user-verifiable collection | 1 | Desired, not implemented yet. |
-| Quality gate before article generation | 2 | Concept defined. Needs implementation. |
+| Visible trace / user-verifiable collection | 4 | trace.jsonl and collection files are generated. Browser-visible mode still needs UI integration. |
+| Quality gate before article generation | 4 | pass/partial/fail and can_generate_article are working in v0 collector output. |
 
 ---
 
@@ -179,3 +179,14 @@ tools/extractors/
   ai_skills.py
   protected_course.py
   generic_web.py
+
+
+## 2026-06-13
+
+| Area | Score / 10 | Notes |
+|---|---:|---|
+| YouTube extractor | 6 | `d2X38zE7VsU` transcript collected successfully: 2,222 transcript segments, 42,540 text chars, quality pass. |
+| Agent Academy extractor | 5 | `microsoft.github.io/agent-academy` collected 7 pages, 62,693 text chars, 140 images, 29 code blocks, quality pass. Lesson-level node splitting still needs improvement. |
+| Universal collector skeleton | 4 | source_graph, collection_report, source_pack, and trace outputs are generated. |
+| Quality gate | 4 | pass/partial/fail and can_generate_article are working at collector level. |
+| Medium writer integration | 2 | Not connected yet by design. |
