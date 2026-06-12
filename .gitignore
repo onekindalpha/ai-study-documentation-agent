@@ -9,3 +9,9 @@ __pycache__/
 DEBUG_INFO_FOR_CHATGPT.txt
 patch_*.py
 *.zip
+
+data/source_runs/
+data/captures/
+tools/extractors/*.before_*
+tools/extractors/*.before_*
+tools/extractors/*.before_*
