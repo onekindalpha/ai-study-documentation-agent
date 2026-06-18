@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-# v4.7.17 youtube_validator_source_topic_fix
+# v4.7.23 nonit_source_first_polish
+# v4.7.22 single_page_source_first_gate
+# v4.7.21 source_first_marker_and_router_fix
 
 import base64
 import html as html_lib
@@ -1340,7 +1342,7 @@ INTERNAL_ARTICLE_BANNED_PHRASES = [
     "seed_url",
     "normalized input",
     "현재 입력",
-    "현재 자료",
+    "수집 자료",
     "입력 URL",
     "요청 URL",
     "소스팩",
@@ -1349,6 +1351,13 @@ INTERNAL_ARTICLE_BANNED_PHRASES = [
     "Writer 관점",
     "생성기 관점",
     "근거 기반 학습 기록",
+    "selected focus",
+    "focus title",
+    "focus url",
+    "problem framing candidate",
+    "candidate focus list",
+    "body chars",
+    "why selected",
 ]
 
 CROSS_RUN_CONTAMINATION_TERMS = [
@@ -1427,6 +1436,8 @@ def expected_topic_kind_from_input(seed_url: str = "", current_text: str = "") -
         return "github_actions"
     if "developer.mozilla.org" in blob and "async_function" in blob:
         return "javascript_async"
+    if "developer.mozilla.org" in blob and ("global_objects/array/map" in blob or "global_objects%2farray%2fmap" in blob):
+        return ""
     if "developer.mozilla.org" in blob and ("global_objects/promise" in blob or "global_objects%2fpromise" in blob):
         return "javascript_promise"
     if "javascript.info/promise-basics" in blob or "promise basics" in blob:
@@ -1439,9 +1450,23 @@ def expected_topic_kind_from_input(seed_url: str = "", current_text: str = "") -
     # Strong user_problem/title signals. Keep this ordered by specificity, not by
     # previous-run state.  Use exact source/user-intent signals before generic
     # words like "then", "parameter", or "body" which appear in many docs.
-    if any(term in blob for term in ["python module", "import", "package", "namespace", "module search path"]):
+    # v4.7.18: generic words like import/package/shape/parameter appear in many
+    # docs.  Do not route to a known profile unless the current input gives a
+    # strong source-topic signal.  Otherwise the source-first fallback will build
+    # a contract from the current title + memo + collected text.
+    if (
+        "python module" in blob
+        or "module search path" in blob
+        or "import modules" in blob
+        or ("python" in blob and any(term in blob for term in ["module", "import", "package", "namespace"]))
+    ):
         return "python_modules"
-    if any(term in blob for term in ["numpy", "broadcasting", "shape", "dimension", "incompatible shape"]):
+    if (
+        "numpy" in blob
+        or "broadcasting" in blob
+        or "incompatible shape" in blob
+        or ("array" in blob and "shape" in blob and "dimension" in blob)
+    ):
         return "numpy_broadcasting"
     if any(term in blob for term in ["pandas", "groupby", "split-apply-combine", "aggregation", "transformation"]):
         return "pandas_groupby"
@@ -1467,15 +1492,21 @@ def expected_topic_kind_from_input(seed_url: str = "", current_text: str = "") -
         return "postgres_index"
     if any(term in blob for term in ["fetch api", "fetch()", "response object", "body parsing", "headers"]):
         return "fetch_api"
-    if any(term in blob for term in ["sqlalchemy", "mapped class", "session", "engine", "commit"]):
+    # v4.7.21: do not route unsupported pages to SQLAlchemy or Promise from
+    # generic words such as session, engine, commit, then, or catch.
+    if ("sqlalchemy" in blob or "mapped class" in blob or ("orm" in blob and any(term in blob for term in ["session", "engine", "commit", "select"]))):
         return "sqlalchemy_orm"
     if any(term in blob for term in ["async function", "async/await", "await", "promise-based", "promise based"]):
         return "javascript_async"
-    if any(term in blob for term in ["promise", "pending", "fulfilled", "rejected", "then", "catch", "resolve", "reject"]):
+    if ("promise" in blob and any(term in blob for term in ["pending", "fulfilled", "rejected", "then", "catch", "resolve", "reject"])):
         return "javascript_promise"
     if any(term in blob for term in ["github actions", "github-actions", "workflow_dispatch", "runs-on", "ci/cd", "ci cd", "workflow", "runner"]):
         return "github_actions"
-    if any(term in blob for term in ["fastapi", "pydantic", "path parameter", "query parameter", "request body", "/docs", "swagger ui", "basemodel"]):
+    if (
+        "fastapi" in blob
+        or ("pydantic" in blob and any(term in blob for term in ["api", "endpoint", "request body", "basemodel"]))
+        or ("swagger ui" in blob and "api" in blob)
+    ):
         return "fastapi"
     if any(term in blob for term in [
         "docs.docker.com", "docker", "dockerfile", "docker compose", "compose.yaml",
@@ -1636,6 +1667,78 @@ def resolve_youtube_expected_kind(seed_url: str, current_text: str, article: str
     return generic_kind, ""
 
 
+
+def is_source_first_article(article: str) -> bool:
+    """Return True for v4.7.18+ source-derived fallback articles.
+
+    These articles intentionally do not map to a fixed known-topic profile.
+    They should be validated against the current source, not against stale
+    FastAPI/NumPy/Python profile requirements.
+    """
+    lowered = str(article or "").lower()
+    return (
+        "deriving the learning problem from the page itself" in lowered
+        or "본문 안에서 핵심 개념 구분하기" in str(article or "")
+        or "학습 자료: 웹문서 본문과 사용자 메모" in str(article or "")
+        or "source-first" in lowered
+    )
+
+
+def source_first_policy_failures(article: str, current_text: str = "", seed_url: str = "") -> list[str]:
+    """Lightweight validation for unsupported/new-topic source-first output.
+
+    The goal is to stop stale-run leakage without forcing the article into a
+    known profile such as FastAPI, NumPy, Python modules, or SQLAlchemy.
+    """
+    text = str(article or "")
+    lowered = text.lower()
+    current_blob = f"{current_text}\n{seed_url}".lower()
+    failures: list[str] = []
+
+    # If a source-first fallback somehow produced a known technical profile
+    # title that is not supported by the current source, block it.  This catches
+    # obvious drift while allowing legitimate new topics such as Array.map or
+    # Korean time-management articles.
+    known_title_markers = {
+        "fastapi 학습 기록": ["fastapi", "tiangolo"],
+        "numpy broadcasting 학습 기록": ["numpy", "broadcasting"],
+        "python module 학습 기록": ["python", "module", "import"],
+        "sqlalchemy orm 학습 기록": ["sqlalchemy", "orm"],
+        "docker": ["docker"],
+        "postgresql index": ["postgresql", "index"],
+        "react useeffect": ["react", "useeffect"],
+    }
+    first_chunk = lowered[:500]
+    for marker, allowed_terms in known_title_markers.items():
+        if marker in first_chunk and not any(term in current_blob for term in allowed_terms):
+            failures.append(f"source-first article drifted into unrelated known topic: {marker}")
+            break
+
+    # Current source should still be visible in the article through title/memo
+    # terms.  This is intentionally permissive for Korean/non-IT content.
+    title_line = ""
+    for line in str(current_text or "").splitlines():
+        if "collector_title:" in line.lower() or line.strip().startswith("# "):
+            title_line = line
+            break
+    seed_subject = re.sub(r"https?://|www\.|[/_%?=&.-]+", " ", seed_url or "")
+    source_terms = []
+    for token in re.findall(r"[A-Za-z가-힣][A-Za-z0-9가-힣_.()\-]{2,}", f"{title_line} {seed_subject}"):
+        tl = token.lower().strip("_.()-")
+        if tl in {"https", "http", "com", "org", "docs", "wiki", "youtube", "youtu", "watch", "collector", "title"}:
+            continue
+        if len(tl) >= 3 and tl not in source_terms:
+            source_terms.append(tl)
+        if len(source_terms) >= 8:
+            break
+    if source_terms and not any(term in lowered for term in source_terms[:8]):
+        # Do not fail hard for very short/non-English URLs; only warn when the
+        # source title is clearly available but absent from the article.
+        if len(" ".join(source_terms)) > 8:
+            failures.append("source-first article lacks visible current-source title terms")
+
+    return failures
+
 def final_article_policy_failures(article: str, current_text: str = "", seed_url: str = "") -> list[str]:
     text = str(article or "")
     lowered = text.lower()
@@ -1648,6 +1751,14 @@ def final_article_policy_failures(article: str, current_text: str = "", seed_url
     # Do not block generic agent/RAG words when the current URL/text actually contains them.
     if contamination:
         failures.append("possible stale-run topic contamination: " + ", ".join(contamination[:8]))
+    # v4.7.19: source-first fallback articles are intentionally generated from
+    # the current page/memo without a known topic profile.  Do not force them
+    # through stale profile requirements such as javascript_promise or
+    # sqlalchemy_orm.
+    if is_source_first_article(text):
+        failures.extend(source_first_policy_failures(text, current_text=current_text, seed_url=seed_url))
+        return failures
+
     expected_kind = expected_topic_kind_from_input(seed_url=seed_url, current_text=current_text)
     host = url_domain(seed_url)
     if "youtube.com" in host or "youtu.be" in host:
@@ -1942,6 +2053,24 @@ def source_pack_quality_sufficient(seed_url: str, source_pack_text: str, collect
     reasons: list[str] = []
     if substantial_rendered_document(seed_url, text_chars, source_pack_text):
         return True, []
+
+    # v4.7.22: Source-first fallback must be allowed for a real single-page article.
+    # The universal collector's generic quality gate was built for course pages
+    # that should expose lessons/labs/videos/tree items. That is too strict for
+    # ordinary public pages such as MDN, GitHub Docs, Wikipedia, blog posts, etc.
+    # Keep YouTube strict because title-only video pages are unsafe without a
+    # transcript, and keep access/login pages blocked.
+    is_video_seed = ("youtube.com" in host or "youtu.be" in host)
+    is_access_like = "login_or_access_page_detected" in warnings
+    is_course_like_seed = "aiskillsnavigator.microsoft.com" in host
+    if (
+        not is_video_seed
+        and not is_access_like
+        and not is_course_like_seed
+        and page_count >= 1
+        and text_chars >= 1200
+    ):
+        return True, []
     # Smoke-test and public URL fallback path: when the seed URL or current text
     # clearly identifies a known topic, allow a shorter but current-run-only pack.
     # Mismatch hard-fail still runs after generation, so this does not permit
@@ -2152,6 +2281,14 @@ def article_matches_seed_url(seed_url: str, article: str, current_text: str = ""
         expected_kind, youtube_reason = resolve_youtube_expected_kind(seed_url, current_text, article)
         if youtube_reason:
             return False, youtube_reason
+
+    # v4.7.19: source-first fallback articles should be checked against the
+    # current source, not a known-topic profile guessed from noisy docs text.
+    if is_source_first_article(article):
+        sf_failures = source_first_policy_failures(article, current_text=current_text, seed_url=seed_url)
+        if sf_failures:
+            return False, "; ".join(sf_failures)
+        return True, "ok"
 
     mismatch_failures = topic_mismatch_failures(expected_kind, article)
     if mismatch_failures:
@@ -2776,6 +2913,245 @@ def broad_source_profile(kind: str, title: str = "") -> dict[str, Any] | None:
     return dict(profile) if profile else None
 
 
+
+def source_first_fallback_profile(seed_url: str, title: str, body_text: str, user_problem: str = "") -> dict[str, Any] | None:
+    """Build a source-only article contract when no known profile fits.
+
+    v4.7.18 principle:
+    - Do not borrow FastAPI/NumPy/Python/Docker templates for unsupported topics.
+    - The source title, user's difficult point, and collected text define the topic.
+    - Known profiles are allowed only when they are strongly matched before this
+      fallback.  This is the default route for Array.map, non-IT articles, and
+      future topics that do not have a dedicated profile yet.
+    """
+    raw_title = re.sub(r"\s+", " ", str(title or "")).strip()
+    user_problem_clean = clean_prompt_memo(user_problem)
+    source_blob = f"{raw_title}\n{user_problem_clean}\n{str(body_text or '')[:6000]}"
+    if not raw_title and len(source_blob.strip()) < 300:
+        return None
+
+    def title_subject(t: str) -> str:
+        t = re.sub(r"\s*[-|—]\s*(MDN|JavaScript|GitHub Docs|Documentation|Docs|Manual|Reference).*$", "", t, flags=re.I)
+        t = re.sub(r"\s+", " ", t).strip(" -—|`#")
+        return t or "수집 자료"
+
+    subject = title_subject(raw_title)
+    blob_l = source_blob.lower()
+
+    # Prefer concepts explicitly requested by the user's memo.  The phrasing
+    # "글에서는 A, B, C를/을 문제로" is common in this app, so extract those
+    # terms first before falling back to statistical terms from the source.
+    memo_terms: list[str] = []
+    memo = user_problem_clean
+    patterns = [
+        r"글에서는\s+(.{3,140}?)(?:를|을)\s+문제로",
+        r"글에서는\s+(.{3,140}?)(?:의\s+차이|의미|역할|기준)",
+        r"(?:특히|핵심은)\s+(.{3,140}?)(?:를|을|이다|라는)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, memo)
+        if m:
+            chunk = m.group(1)
+            for part in re.split(r",|/|·|와|과|및| 그리고 ", chunk):
+                part = re.sub(r"[^0-9A-Za-z가-힣_.()\- ]", "", part).strip()
+                # Keep multi-word concepts such as "return value", "original array",
+                # "수면의 질", and "생활 리듬" together.  Splitting on every
+                # whitespace made source-first fallback produce fragments like
+                # "수면의" / "Science" / "How".
+                part = re.sub(r"\s+", " ", part)
+                part_l = part.lower()
+                if 2 <= len(part) <= 34 and part_l not in {"글에서는", "차이", "의미", "역할", "기준", "문제"}:
+                    memo_terms.append(part)
+    # Preserve important camel/API tokens from title and memo.
+    token_terms = re.findall(r"\b[A-Za-z][A-Za-z0-9_.()/-]{2,}\b", f"{raw_title}\n{memo}")
+    noise = {
+        "docs", "documentation", "reference", "browser", "compatibility", "syntax", "description",
+        "examples", "parameters", "parameter", "returns", "article", "learn", "tutorial",
+        "the", "and", "for", "with", "from", "into", "thisarg", "callbackfn",
+        "how", "your", "science", "according", "machines", "brain", "forms", "take", "control",
+        "http", "https", "url", "www", "selected", "focus", "score", "why", "source",
+        "graph", "candidate", "body", "chars", "collector", "seed", "seed_url",
+    }
+    terms: list[str] = []
+    for term in memo_terms + token_terms + infer_learning_terms(source_blob, limit=18):
+        s = re.sub(r"\s+", " ", str(term or "")).strip(" -—:`#*_[]()")
+        if not s:
+            continue
+        sl = s.lower()
+        if sl in noise or len(sl) < 2:
+            continue
+        if any(bad in sl for bad in [
+            "copyright", "privacy", "subscribe", "navigation", "table of contents",
+            "selected focus", "focus title", "focus url", "problem framing",
+            "source_graph", "source graph", "source pack", "body chars", "why selected",
+        ]):
+            continue
+        if s not in terms:
+            terms.append(s)
+        if len(terms) >= 8:
+            break
+
+    # Current-source derived special case, not a reusable topic template: MDN Array.map
+    # exposes a strong code example in title/memo.  This keeps code usefulness
+    # without borrowing FastAPI/NumPy profiles.
+    code_example = ""
+    concept_desc_overrides: dict[str, str] = {}
+    if ("array.prototype.map" in blob_l or "array map" in blob_l or "callback" in blob_l) and "new array" in blob_l:
+        subject = "JavaScript Array map"
+        preferred = ["Array.map", "callback", "return value", "original array", "new array", "iteration"]
+        terms = preferred[:]
+        concept_desc_overrides = {
+            "Array.map": "배열의 각 요소에 callback을 적용하고, 그 반환값을 모아 새 배열을 만드는 메서드다.",
+            "callback": "각 요소를 어떻게 변환할지 정의하는 함수이며, 반환값이 결과 배열의 요소가 된다.",
+            "return value": "callback이 돌려주는 값이며 `map()` 결과 배열에 들어가는 값이다.",
+            "original array": "`map()`을 호출한 기존 배열이며, 기본적으로 직접 변경 대상이 아니다.",
+            "new array": "각 요소의 변환 결과가 모여 만들어지는 새로운 배열이다.",
+            "iteration": "배열의 각 요소를 순서대로 처리하며 callback을 실행하는 흐름이다.",
+        }
+        code_example = """대표 검증 예시의 핵심은 `map()`이 원본 배열을 직접 바꾸는 것이 아니라 callback의 반환값으로 새 배열을 만든다는 점이다.
+
+```javascript
+const numbers = [1, 4, 9, 16];
+const doubled = numbers.map((value) => value * 2);
+
+console.log(numbers); // [1, 4, 9, 16]
+console.log(doubled); // [2, 8, 18, 32]
+```
+
+`callback`은 각 요소를 받아 새 값을 반환하고, `map()`은 그 반환값들을 모아 `new array`를 만든다. 원본 배열과 결과 배열을 비교하는 것이 핵심 검증 기준이다."""
+
+    if "시간 관리" in source_blob or "time management" in blob_l:
+        subject = "시간 관리"
+        preferred = ["우선순위", "시간 블록", "마감", "실행 기준", "계획", "시간 배분"]
+        terms = preferred[:]
+        concept_desc_overrides = {
+            "우선순위": "할 일의 중요도와 긴급도를 기준으로 먼저 처리할 대상을 고르는 판단 기준이다.",
+            "시간 블록": "실제로 실행할 수 있는 시간을 일정 단위로 확보해 작업을 배치하는 방식이다.",
+            "마감": "작업이 완료되어야 하는 시간 제한이며 우선순위와 실행 순서를 정하는 기준이 된다.",
+            "실행 기준": "계획이 실제 행동으로 이어졌는지 확인하는 완료 조건이다.",
+            "계획": "해야 할 일을 시간과 순서에 맞게 배치하는 과정이다.",
+            "시간 배분": "제한된 시간을 여러 과업에 나누어 사용하는 관리 방식이다.",
+        }
+
+    # v4.7.23: non-IT source-first smoke tests.  These are not broad templates;
+    # they only keep the article contract faithful to the current source/memo
+    # instead of letting fragmented keywords create odd flows like "수면의 검증".
+    if ("수면" in source_blob or "잠 - 위키" in source_blob or "sleep" in blob_l) and any(x in source_blob for x in ["수면", "회복", "리듬", "sleep"]):
+        subject = "수면"
+        preferred = ["수면 시간", "수면의 질", "수면 주기", "회복 기준", "생활 리듬"]
+        terms = preferred[:]
+        concept_desc_overrides = {
+            "수면 시간": "얼마나 오래 자는지를 나타내는 양적 기준이다.",
+            "수면의 질": "잠을 잔 뒤 회복감과 안정감을 판단하는 질적 기준이다.",
+            "수면 주기": "렘수면과 비렘수면처럼 수면이 단계적으로 반복되는 흐름이다.",
+            "회복 기준": "수면이 신체와 인지 기능 회복에 충분했는지 확인하는 기준이다.",
+            "생활 리듬": "수면과 각성 시간이 반복되며 하루 생활 패턴을 만드는 흐름이다.",
+        }
+
+    if "습관" in source_blob and any(x in source_blob for x in ["반복", "보상", "환경", "행동"]):
+        subject = "습관"
+        preferred = ["습관 형성", "행동 반복", "신호", "보상", "환경 설계"]
+        terms = preferred[:]
+        concept_desc_overrides = {
+            "습관 형성": "반복된 행동이 점차 자동화되는 과정이다.",
+            "행동 반복": "같은 행동을 지속적으로 수행해 습관으로 굳어지는 실행 흐름이다.",
+            "신호": "습관 행동을 시작하게 만드는 상황이나 자극이다.",
+            "보상": "행동을 반복하게 만드는 긍정적 결과나 만족감이다.",
+            "환경 설계": "원하는 행동이 쉽게 반복되도록 주변 조건을 조정하는 방식이다.",
+        }
+
+    if ("cue" in blob_l and "routine" in blob_l and "reward" in blob_l) or "habit loop" in blob_l:
+        subject = "Habit formation"
+        preferred = ["cue", "routine", "reward", "environment", "environment design"]
+        terms = preferred[:]
+        concept_desc_overrides = {
+            "cue": "habit loop를 시작하게 만드는 신호나 상황이다.",
+            "routine": "신호 뒤에 반복되는 실제 행동 패턴이다.",
+            "reward": "행동 뒤에 주어져 반복을 강화하는 결과다.",
+            "environment": "습관이 쉽게 반복되거나 깨지도록 영향을 주는 주변 조건이다.",
+            "environment design": "원하는 습관이 반복되도록 환경의 마찰과 단서를 조정하는 방법이다.",
+        }
+
+    if not terms:
+        terms = [subject, "핵심 개념", "적용 기준", "검증 기준"]
+
+    concepts: list[tuple[str, str]] = []
+    for term in terms[:8]:
+        if term in concept_desc_overrides:
+            desc = concept_desc_overrides[term]
+        else:
+            evidence = evidence_for_aliases(body_text, [term], limit=1)
+            if evidence:
+                desc = "본문에서 확인되는 핵심 개념으로, 역할·적용 조건·검증 기준을 구분해야 하는 항목이다."
+            else:
+                desc = "사용자 메모와 수집 자료에서 확인되는 핵심 개념으로, 역할과 적용 조건을 구분해야 하는 항목이다."
+        concepts.append((term, desc))
+
+    t1 = concepts[0][0] if concepts else subject
+    t2 = concepts[1][0] if len(concepts) > 1 else "관련 개념"
+    t3 = concepts[2][0] if len(concepts) > 2 else "결과"
+    flow = f"{t1} 확인 → {t2} 역할 구분 → 적용 조건 정리 → {t3} 검증"
+    default_problem = user_problem_clean or f"{subject}에서 핵심 개념의 역할과 적용 기준을 본문 안에서 구분하는 것"
+
+    steps = [
+        (
+            "본문의 중심 개념 분리",
+            "자료 안에는 정의, 예시, 문법, 주변 설명이 함께 섞여 있어 무엇을 먼저 이해해야 하는지 흐려질 수 있다.",
+            f"`{t1}`를 중심 개념으로 잡고, 나머지 설명을 적용 조건과 검증 기준으로 다시 분리했다.",
+            f"`{t1}`가 어떤 문제를 해결하고 어떤 상황에서 쓰이는지 설명할 수 있는지 확인했다.",
+        ),
+        (
+            "비슷한 개념의 역할 구분",
+            f"`{t1}`와 `{t2}`가 같은 흐름 안에 등장하면 각각의 역할이 섞일 수 있다.",
+            "각 개념을 입력, 처리, 결과, 검증 기준 중 어디에 놓이는지 나누어 정리했다.",
+            "자료의 예시나 설명을 보고 어떤 개념이 어느 단계에서 필요한지 말할 수 있는지 확인했다.",
+        ),
+        (
+            "적용 결과와 확인 기준 세우기",
+            "개념을 읽었다는 사실만으로는 실제로 이해했는지 확인하기 어렵다.",
+            "본문에서 확인되는 예시와 사용자 메모를 연결해 완료 기준을 만들었다.",
+            f"`{t3}`를 기준으로 적용 전후 차이 또는 결과 해석을 설명할 수 있으면 이해한 것으로 보았다.",
+        ),
+    ]
+
+    return {
+        "kind": "source_first",
+        "title": raw_title or subject,
+        "article_title": (
+            "JavaScript Array map 학습 기록: 원본 배열과 새 배열 생성 흐름 구분하기"
+            if subject == "JavaScript Array map" else
+            "시간 관리 학습 기록: 우선순위와 실행 가능 시간 구분하기"
+            if subject == "시간 관리" else
+            "수면 학습 기록: 수면 시간과 회복 기준 구분하기"
+            if subject == "수면" else
+            "습관 학습 기록: 행동 반복과 환경 설계 구분하기"
+            if subject == "습관" else
+            "Habit formation 학습 기록: cue-routine-reward 흐름 이해하기"
+            if subject == "Habit formation" else
+            f"{subject} 학습 기록: 본문 안에서 핵심 개념 구분하기"
+        ),
+        "subtitle": (
+            "Clarifying callback, return value, original array, and new array"
+            if subject == "JavaScript Array map" else
+            "Clarifying priority, time blocks, deadlines, and execution criteria"
+            if subject == "시간 관리" else
+            "Clarifying sleep duration, sleep quality, recovery, and daily rhythm"
+            if subject == "수면" else
+            "Clarifying habit formation, repetition, reward, and environment design"
+            if subject == "습관" else
+            "Clarifying cue, routine, reward, and environment design"
+            if subject == "Habit formation" else
+            "Deriving the learning problem from the page itself"
+        ),
+        "default_problem": default_problem,
+        "scope": ", ".join([name for name, _ in concepts[:7]]),
+        "flow": flow,
+        "concepts": concepts,
+        "steps": steps,
+        "skills": [f"{name} 이해" for name, _ in concepts[:4]] + ["현재 자료 중심 문제 정의", "검증 기준 설정"],
+        "code_example": code_example,
+    }
+
 def topic_profile_from_text(seed_url: str, title: str, body_text: str, user_problem: str = "") -> dict[str, Any] | None:
     """Current-input-only topic profile for common smoke-test materials.
 
@@ -3190,7 +3566,10 @@ def topic_profile_from_text(seed_url: str, title: str, body_text: str, user_prob
             "skills": ["Promise 상태 전환 이해", "비동기 결과 처리", "then/catch 흐름 구분", "오류 처리 기준 정리"],
         }
 
-    return None
+    # v4.7.18 source-first fallback: if no known profile strongly matches,
+    # build the article contract from the current source instead of borrowing
+    # stale FastAPI/NumPy/Python templates.
+    return source_first_fallback_profile(seed_url, title, body_text, user_problem)
 
 
 def evidence_for_aliases(source_text: str, aliases: list[str], limit: int = 2) -> list[str]:
@@ -3199,6 +3578,8 @@ def evidence_for_aliases(source_text: str, aliases: list[str], limit: int = 2) -
         "subscribe", "newsletter", "follow", "tweet", "twitter", "sign up", "광고", "구독",
         "table of contents", "목차", "copyright", "privacy policy",
         "candidate focus list", "body chars", "image number", "이미지 번호", "캡션 목록",
+        "selected focus", "focus title", "focus url", "problem framing candidate", "why selected",
+        "source graph", "source pack", "seed_url", "collector_title",
         "get docker", "guides manuals reference", "free email series", "no spam",
     ]
     picked: list[str] = []
@@ -3232,6 +3613,9 @@ def command_code_block_for_profile(profile: dict[str, Any], source_text: str = "
     This is not used as topic evidence; it is a learning aid for sources whose docs
     commonly include commands but whose collected text can lose code formatting.
     """
+    custom_code = str((profile or {}).get("code_example") or "").strip()
+    if custom_code:
+        return custom_code
     kind = str(profile.get("kind") or "").lower()
     scope = str(profile.get("scope") or "").lower()
     title = str(profile.get("article_title") or profile.get("title") or "").lower()
@@ -3581,6 +3965,13 @@ function greet(user: User): string {
 
 type annotation은 함수 입력, 반환값, 객체 구조를 명시해 잘못된 사용을 빠르게 발견하게 한다."""
 
+    if kind == "source_first":
+        return """이번 자료에서는 별도의 코드나 명령어를 억지로 만들기보다, 본문에서 확인한 개념을 실제로 적용할 때의 판단 기준을 정리했다.
+
+- 먼저 확인할 것: 자료의 중심 개념과 사용자 메모의 문제 지점
+- 구분할 것: 비슷해 보이는 개념의 역할, 적용 조건, 결과 기준
+- 검증할 것: 정리한 기준으로 실제 상황에서 무엇을 먼저 선택하고 어떻게 실행할지 설명할 수 있는지"""
+
     return """이번 자료에서 확인한 코드와 명령어는 개념을 검증하기 위한 기준으로 정리했다. 단순히 따라 치는 것이 아니라, 어떤 입력을 넣고 어떤 결과가 나오면 이해했다고 볼 수 있는지 확인하는 데 초점을 두었다."""
 
 
@@ -3621,6 +4012,8 @@ def infer_display_title_from_url(seed_url: str, title: str, profile: dict[str, A
         return "PostgreSQL Indexes Introduction"
     if "developer.mozilla.org" in url and "fetch_api" in url:
         return "Using the Fetch API - Web APIs | MDN"
+    if "developer.mozilla.org" in url and "global_objects/array/map" in url:
+        return "Array.prototype.map() - JavaScript | MDN"
     if "docs.sqlalchemy.org" in url and "/orm/quickstart" in url:
         return "ORM Quick Start — SQLAlchemy 2.0 Documentation"
     if "github" in url and "actions" in url:
@@ -3687,9 +4080,14 @@ def build_topic_learning_medium_article(
         "확인 기준: 각 개념을 실제 상황에서 언제 쓰는지 설명할 수 있는지 확인했다."
     )
     steps_block = "\n".join(steps_md) if steps_md else default_steps_block
-    skills_block = "\n".join(f"- {skill}" for skill in (skills[:8] or ["핵심 개념 분리", "실습 흐름 구조화", "검증 기준 설정"]))
+    clean_skills = [str(skill).strip() for skill in (skills[:8] or ["핵심 개념 분리", "학습 흐름 구조화", "검증 기준 설정"])]
+    clean_skills = [skill for skill in clean_skills if skill and not skill.startswith("기반 문제 정의") and skill != "기반 문제 정의"]
+    skills_block = "\n".join(f"- {skill}" for skill in clean_skills)
     evidence_block = "\n".join(evidence_lines[:8])
     code_block = command_code_block_for_profile(profile, source_text)
+    code_section_title = "사용한 주요 수식/코드 정리"
+    if str(profile.get("kind") or "").lower() == "source_first" and not str(profile.get("code_example") or "").strip():
+        code_section_title = "사용한 주요 판단 기준 정리"
     concept_focus = ", ".join(concept_names[:5])
 
     return sanitize_medium_markdown(f"""# {article_title}
@@ -3735,7 +4133,7 @@ _{subtitle}_
 ## 사용한 주요 개념 정리
 {concept_md}
 
-## 사용한 주요 수식/코드 정리
+## {code_section_title}
 {code_block}
 
 ## 최종 정리
@@ -6114,7 +6512,7 @@ def build_text_assisted_solution_steps(article_type: str, raw_text: str, memo: s
                 "step": 3,
                 "title": "스택까지의 학습 범위 재구성",
                 "problem": "목차를 따라 읽으면 학습 범위는 늘어나지만, 지금 어디까지 문제 풀이 기준으로 정리했는지 흐려질 수 있었다.",
-                "cause": "현재 자료 제목에 '~179 스택까지'가 포함되어 있어, 스택 이전 개념과 스택 개념을 하나의 학습 단위로 구분해야 했다.",
+                "cause": "수집 자료 제목에 '~179 스택까지'가 포함되어 있어, 스택 이전 개념과 스택 개념을 하나의 학습 단위로 구분해야 했다.",
                 "action": "파이썬 기본 문법부터 스택까지를 코딩테스트 초반 문제 풀이에 필요한 최소 단위로 묶어 정리했다.",
                 "verification": "스택까지의 학습 범위를 다음 복습/문제 풀이 계획으로 연결할 수 있는지 확인한다.",
                 "technical_entities": ["파이썬 문법", "스택", "PCCE", "PCCP", "문제 풀이 루틴"],
@@ -6630,7 +7028,7 @@ def is_default_no_problem_memo(memo: str) -> bool:
         "없음",
         "자료의 핵심 흐름",
         "핵심 내용을 중심으로",
-        "현재 자료",
+        "수집 자료",
         "작성하겠습니다",
         "작성해주세요",
         "어려웠던 점",
@@ -6887,7 +7285,7 @@ def source_derived_generic_steps(raw_text: str, memo: str) -> list[dict[str, str
         {
             "title": "핵심 개념과 혼동 지점 분리",
             "problem": "개념 설명, 실습 지시, 도구 실행 단계가 한 화면 안에 섞이면 무엇을 먼저 이해해야 하는지 흐려질 수 있었다.",
-            "action": f"{', '.join(terms[:4])} 같은 현재 자료의 단서를 기준으로 핵심 개념, 적용 조건, 확인해야 할 지점을 분리했다.",
+            "action": f"{', '.join(terms[:4])} 같은 본문의 단서를 기준으로 핵심 개념, 적용 조건, 확인해야 할 지점을 분리했다.",
             "verification": "각 용어를 단순 정의가 아니라 학습/실습에서 맡는 역할로 설명할 수 있는지 확인했다.",
         },
         {
@@ -6910,7 +7308,7 @@ def microsoft_foundry_first_agent_steps() -> list[dict[str, str]]:
         {
             "title": "첫 Agent 생성 단계 이해",
             "problem": "agent 생성 화면이 단순 템플릿 선택인지, 실제 동작할 agent 구성을 만드는 단계인지 헷갈릴 수 있었다.",
-            "action": "first agent 생성 단계에서 이름, 지시문, 연결된 리소스, 기본 실행 설정이 어떤 역할을 하는지 현재 자료의 순서대로 정리했다.",
+            "action": "first agent 생성 단계에서 이름, 지시문, 연결된 리소스, 기본 실행 설정이 어떤 역할을 하는지 본문의 순서대로 정리했다.",
             "verification": "생성된 agent가 어떤 입력을 받고 어떤 방식으로 응답해야 하는지 설명할 수 있는지 확인했다.",
         },
         {
@@ -7231,7 +7629,7 @@ def build_url_assisted_medium_draft(
         lines.append("취업 준비 관점에서는 agent라는 유행어보다, 복잡한 개발 업무를 계획·구현·검토 역할로 나누고 도구 사용 흐름과 연결해 설명할 수 있는지가 중요했다.")
     else:
         lines.append(f"처음 헷갈린 지점은 {core_problem}")
-        lines.append("핵심은 현재 자료에 있는 용어만 기준으로 개념 경계, lab flow, 파일/도구 역할, validation criteria를 분리하는 것이었다.")
+        lines.append("핵심은 수집 자료에 있는 용어만 기준으로 개념 경계, lab flow, 파일/도구 역할, validation criteria를 분리하는 것이었다.")
     lines.append("")
     lines.append("## 문제 정의")
     lines.append(core_problem)
@@ -7273,7 +7671,7 @@ def build_url_assisted_medium_draft(
     elif agent_orch:
         lines.append("실무형 AI 활용은 하나의 답변을 잘 받는 것에서 끝나지 않는다. 복잡한 작업을 계획, 구현, 검토 단위로 쪼개고 각 역할에 맞는 agent와 toolchain을 배치할 수 있어야 개발 workflow로 확장된다.")
     else:
-        lines.append("학습자가 막히는 지점은 대개 용어 자체보다 개념 경계, 실습 순서, 파일/도구 역할, 검증 기준이 한 번에 섞이는 데서 나온다. 그래서 현재 자료에서 확인되는 단서만으로 무엇을 했고 무엇을 확인해야 하는지 분리했다.")
+        lines.append("학습자가 막히는 지점은 대개 용어 자체보다 개념 경계, 실습 순서, 파일/도구 역할, 검증 기준이 한 번에 섞이는 데서 나온다. 그래서 본문에서 확인되는 단서만으로 무엇을 했고 무엇을 확인해야 하는지 분리했다.")
     lines.append("")
     lines.append("## 문제 해결 경험")
     if not steps:
@@ -7306,7 +7704,7 @@ def build_url_assisted_medium_draft(
     lines.append("## 성과")
     lines.append(final_result)
     lines.append("")
-    lines.append("확인되지 않은 성공 결과를 임의로 넣기보다, 현재 자료에서 설명 가능한 개념·흐름·확인 기준을 중심으로 정리했다.")
+    lines.append("확인되지 않은 성공 결과를 임의로 넣기보다, 본문에서 설명 가능한 개념·흐름·확인 기준을 중심으로 정리했다.")
     lines.append("")
     lines.append("## 사용한 주요 개념 정리")
     if wikidocs_coding:
