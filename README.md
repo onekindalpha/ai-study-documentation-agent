@@ -1,3 +1,14 @@
+---
+title: AI Study Documentation Agent
+emoji: 📝
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+app_file: app/main.py
+pinned: false
+license: mit
+---
+
 # AI Study Documentation Agent
 
 Lecture capture-to-technical blog generation service that turns screenshots, course URLs, lab instructions, and rough notes into problem-solving Medium-style drafts.
