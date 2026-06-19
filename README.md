@@ -1,3 +1,13 @@
+---
+title: AI Study Documentation Agent
+emoji: 📚
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # AI Study Documentation Agent
 
 학습 화면, 코드 실습, 에러 로그를 캡처 기록으로 저장하고 기술 노트와 블로그 초안으로 연결하는 개인 학습 기록 자동화 MVP입니다.
@@ -78,8 +88,14 @@ http://127.0.0.1:7870
 GROQ_API_KEY=your_api_key
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+GROQ_VISION_CHUNK_SIZE=3
+GROQ_VISION_MAX_TOKENS=1200
 PORT=7870
 ```
+
+## Hugging Face Spaces
+
+Docker Space에서는 `PORT=7860`으로 실행됩니다. `GROQ_API_KEY`는 Space Settings의 Secret으로 등록하고 저장소에 커밋하지 않습니다. 자세한 순서는 `HUGGINGFACE_DEPLOY.md`를 확인하세요.
 
 ## Next Steps
 
