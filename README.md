@@ -4,7 +4,7 @@ Lecture capture-to-technical blog generation service that turns screenshots, cou
 
 ## Demo
 
-- Live Demo: (https://huggingface.co/spaces/onekindalpha/study-capture-copilot)
+- Live Demo: https://huggingface.co/spaces/onekindalpha/study-capture-agent
 
 ## What It Does
 
