@@ -1,5 +1,7 @@
 # AI Study Documentation Agent
 
+**Language:** English | [한국어](./README.ko.md)
+
 AI Study Documentation Agent is a study documentation pipeline that turns scattered learning records into structured technical writing.
 
 During lectures, coding labs, and debugging sessions, useful learning evidence is often fragmented across screenshots, URLs, rough notes, error logs, and Q&A. This project organizes those records into session-based evidence and converts them into reusable technical notes, troubleshooting records, and problem-solving blog drafts.
