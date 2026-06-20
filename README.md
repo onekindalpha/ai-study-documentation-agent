@@ -1,4 +1,4 @@
-# AI Study Documentation Agent
+# Study Documentation Automation Ai Agent
 
 **Language:** English | [한국어](./README.ko.md)
 
