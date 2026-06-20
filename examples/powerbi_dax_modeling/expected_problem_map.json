@@ -1,0 +1,55 @@
+{
+  "article_type": "dax_measure_modeling",
+  "problem_kind": "analysis_design_task",
+  "core_problem": "Sales 데이터를 단순 합계로만 보는 상태에서는 Date table, MonthKey 정렬, explicit measure, Target, Variance 기준의 분석이 어렵기 때문에 계산 맥락을 별도로 구성해야 했다.",
+  "why_problematic": "월 이름이 텍스트로 정렬되면 시간 순서가 깨질 수 있고 raw column 자동 집계는 분석 의도를 명확히 반영하지 못한다. TargetAmount를 그대로 합산하면 Total 행이나 Salesperson별 목표 비교에서 해석이 흐려질 수 있다.",
+  "root_causes": [
+    "Month 텍스트 컬럼은 시간 순서를 보장하지 않음",
+    "Date table이 공식 날짜 테이블로 지정되지 않으면 시간 기반 분석 기준이 약함",
+    "raw column 자동 집계는 계산 의도와 format 관리가 불명확함",
+    "Target, Variance, Variance Margin이 없으면 목표 대비 성과 해석이 어려움"
+  ],
+  "solution_steps": [
+    {
+      "step": 1,
+      "title": "Month 컬럼을 MonthKey 기준으로 정렬",
+      "problem": "Month 이름이 시간 순서를 보장하지 않음",
+      "cause": "텍스트 월 이름은 기본 정렬 기준이 실제 월 순서와 다를 수 있음",
+      "action": "MonthKey를 Sort by column 기준으로 사용",
+      "verification": "월이 시간 흐름대로 정렬되는지 확인"
+    },
+    {
+      "step": 2,
+      "title": "Fiscal 기준이 반영된 Date table 구성",
+      "problem": "Sales 날짜 기준 분석을 일관되게 하기 어려움",
+      "cause": "날짜 차원이 명확히 분리되어 있지 않음",
+      "action": "CALENDARAUTO(6) 등으로 Date table을 구성하고 Mark as date table 처리",
+      "verification": "Date table이 Sales와 연결되고 공식 날짜 테이블로 지정되는지 확인"
+    },
+    {
+      "step": 3,
+      "title": "Raw column 자동 집계 대신 explicit measure 구성",
+      "problem": "Unit Price 같은 컬럼을 그대로 Matrix에 넣으면 자동 집계에 의존함",
+      "cause": "자동 평균은 계산 의도와 format 관리가 명확하지 않음",
+      "action": "Avg Price, Median Price, Min Price, Max Price, Orders, Order Lines measure를 생성",
+      "verification": "Matrix에서 가격과 주문 지표가 의도한 measure 기준으로 표시되는지 확인"
+    },
+    {
+      "step": 4,
+      "title": "Target measure와 Variance 계열 measure 구성",
+      "problem": "Sales와 Target만 나열하면 목표 대비 초과/미달 정도를 판단하기 어려움",
+      "cause": "차이와 비율 지표가 없으면 성과 해석이 정성적 판단에 머무름",
+      "action": "Target, Variance, Variance Margin measure를 추가",
+      "verification": "Salesperson별 Sales, Target, Variance, Variance Margin을 최종 Matrix에서 비교"
+    }
+  ],
+  "complex_problem": {
+    "title": "TargetAmount를 그대로 쓰지 않고 Target measure로 제어해야 하는 문제",
+    "symptom": "목표값이 화면에 보이더라도 Salesperson별/Total 기준에서 해석이 명확하지 않을 수 있음",
+    "initial_assumption": "TargetAmount 컬럼 합계를 그대로 쓰면 목표 분석이 가능할 것처럼 보임",
+    "actual_cause": "목표값은 filter context와 집계 수준에 따라 계산 의도가 달라지므로 explicit measure가 필요함",
+    "resolution": "Target measure와 Variance, Variance Margin measure를 구성해 목표 대비 성과를 계산",
+    "verification": "Salesperson별 Sales, Target, Variance, Variance Margin 최종 화면에서 비교"
+  },
+  "final_outcome": "날짜 정렬, fiscal Date table, 가격 measure, Target/Variance measure를 통해 단순 Sales 집계 화면을 목표 대비 성과 분석 모델로 확장함"
+}

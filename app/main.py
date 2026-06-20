@@ -69,6 +69,18 @@ SESSIONS_PATH.touch(exist_ok=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+
+
+def bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+GROQ_VISION_CHUNK_SIZE = bounded_int_env("GROQ_VISION_CHUNK_SIZE", 3, 1, 5)
+GROQ_VISION_MAX_TOKENS = bounded_int_env("GROQ_VISION_MAX_TOKENS", 1200, 400, 2000)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
 MODEL_PROVIDER_FAST = os.getenv("MODEL_PROVIDER_FAST", "groq")
@@ -152,6 +164,7 @@ class LLM:
     def __init__(self) -> None:
         self.client = None
         self.last_diagnostics: dict[str, Any] = {}
+        self.last_vision_error: Exception | None = None
 
     def get_client(self) -> Any:
         if self.client:
@@ -1768,14 +1781,20 @@ def contamination_hits(article_text: str, current_text: str = "", seed_url: str 
     return hits
 
 
-def final_article_policy_failures(article: str, current_text: str = "", seed_url: str = "") -> list[str]:
+def final_article_policy_failures(
+    article: str,
+    current_text: str = "",
+    seed_url: str = "",
+    contamination_context: str = "",
+) -> list[str]:
     text = str(article or "")
     lowered = text.lower()
     failures: list[str] = []
     leaked = [phrase for phrase in INTERNAL_ARTICLE_BANNED_PHRASES if phrase and phrase.lower() in lowered]
     if leaked:
         failures.append("internal/placeholder terms leaked: " + ", ".join(leaked[:8]))
-    contamination = contamination_hits(text, current_text=current_text, seed_url=seed_url)
+    contamination_input = "\n".join([current_text, contamination_context])
+    contamination = contamination_hits(text, current_text=contamination_input, seed_url=seed_url)
     # v4.7.25: use token/phrase matching so RAG does not match storage.
     if contamination:
         failures.append("possible stale-run topic contamination: " + ", ".join(contamination[:8]))
@@ -1825,9 +1844,94 @@ def final_article_policy_report(seed_url: str, run_id: str, failures: list[str],
 """
 
 
-def apply_final_article_policy(result: dict[str, Any], current_text: str = "", seed_url: str = "", run_id: str = "") -> dict[str, Any]:
+def current_run_image_policy_context(result: dict[str, Any]) -> str:
+    """Return trusted Vision evidence for image-upload-only final validation.
+
+    Filename/README fallbacks are deliberately excluded so an old template or
+    suggestive filename cannot whitelist an unrelated topic.  This context is
+    added only by the batch-upload handler when actual images were uploaded.
+    """
+    evidence = result.get("image_evidence")
+    if not isinstance(evidence, list):
+        return ""
+
+    trusted_items: list[dict[str, Any]] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("evidence_source") or "").strip().lower()
+        try:
+            confidence = float(item.get("confidence") or 0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if source not in {"vision", "llm"} or confidence < 0.5:
+            continue
+        trusted_items.append(item)
+
+    grounded_lines: list[str] = []
+    direct_text_parts: list[str] = []
+    claim_counts: dict[str, int] = {}
+    claim_labels: dict[str, str] = {}
+    for item in trusted_items:
+        parts: list[str] = []
+        for key in ("caption",):
+            value = str(item.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        parts.extend(normalize_str_list(item.get("visible_evidence"))[:10])
+        parts.extend(normalize_str_list(item.get("technical_entities"))[:12])
+        if parts:
+            grounded_lines.append(" | ".join(parts))
+            direct_text_parts.extend(parts)
+
+        claims = [
+            str(item.get("primary_topic") or "").strip(),
+            str(item.get("platform_or_product") or "").strip(),
+            *normalize_str_list(item.get("topic_terms"))[:12],
+        ]
+        for claim in claims:
+            normalized = re.sub(r"\s+", " ", claim.lower()).strip()
+            if not normalized:
+                continue
+            claim_counts[normalized] = claim_counts.get(normalized, 0) + 1
+            claim_labels.setdefault(normalized, claim)
+
+    if not grounded_lines:
+        return ""
+
+    direct_blob = "\n".join(direct_text_parts).lower()
+    agreed_claims = [
+        claim_labels[key]
+        for key, count in claim_counts.items()
+        if count >= 2 or contains_contamination_term(direct_blob, key)
+    ]
+    context = "[CURRENT_RUN_VISION_EVIDENCE]\n" + "\n".join(grounded_lines)[:18000]
+    if agreed_claims:
+        context += "\n[CURRENT_RUN_IMAGE_TOPIC_CONSENSUS]\n" + " | ".join(agreed_claims[:24])
+    return context
+
+
+def apply_final_article_policy(
+    result: dict[str, Any],
+    current_text: str = "",
+    seed_url: str = "",
+    run_id: str = "",
+    contamination_context: str = "",
+) -> dict[str, Any]:
     draft = str(result.get("draft") or "")
-    failures = final_article_policy_failures(draft, current_text=current_text, seed_url=seed_url)
+    critic = result.get("critic_report") if isinstance(result.get("critic_report"), dict) else {}
+    metrics = critic.get("metrics") if isinstance(critic.get("metrics"), dict) else {}
+    if metrics.get("failure_type") == "vision_rate_limit":
+        # Provider diagnostics are user-facing error reports, not generated
+        # articles.  Running them through article contamination checks hides the
+        # real API failure behind an unrelated policy message.
+        return result
+    failures = final_article_policy_failures(
+        draft,
+        current_text=current_text,
+        seed_url=seed_url,
+        contamination_context=contamination_context,
+    )
     if not failures:
         result["draft"] = sanitize_medium_markdown(draft)
         return result
@@ -5913,6 +6017,13 @@ def generate_medium_article_pipeline(
         article_type = str(classification.get("article_type") or "unknown")
         golden_context = load_golden_context(article_type)
         evidence = build_image_evidence(llm_client, raw_text, memo, ordered_files, topic, extra_info, ordered_names)
+        if image_files and is_groq_rate_limit_error(llm_client.last_vision_error):
+            return vision_rate_limit_response(
+                llm_client.last_vision_error,
+                image_count=len(ordered_files),
+                capture_count=len(captures),
+                qa_count=len(qa_logs),
+            )
         evidence = ensure_image_evidence_coverage(evidence, ordered_files, ordered_names, raw_text, memo, golden_context)
         auto_topic_hint = image_only_auto_topic_hint(raw_text, memo, len(ordered_files), evidence, ordered_names)
         if auto_topic_hint:
@@ -9295,6 +9406,7 @@ def build_image_evidence(
     extra_info: str,
     image_names: list[str],
 ) -> list[dict[str, Any]]:
+    llm_client.last_vision_error = None
     caption_source = read_image_order_caption_source()
     filename_context = "\n".join(
         f"이미지 {index}: original_filename={name}, saved_filename={path.name}"
@@ -9318,15 +9430,18 @@ def build_image_evidence(
         return fallback_image_evidence(image_files, image_names, raw_text, memo, caption_source)
 
     results: list[dict[str, Any]] = []
-    for start in range(0, len(image_files), 5):
-        chunk = image_files[start : start + 5]
-        chunk_names = image_names[start : start + 5]
+    for start in range(0, len(image_files), GROQ_VISION_CHUNK_SIZE):
+        chunk = image_files[start : start + GROQ_VISION_CHUNK_SIZE]
+        chunk_names = image_names[start : start + GROQ_VISION_CHUNK_SIZE]
         prompt = f"""
 입력 이미지를 순서대로 분석해 ImageEvidence JSON 배열만 반환하세요.
 
 각 원소는 반드시 이 구조를 따릅니다.
 {{
   "image_no": 1,
+  "primary_topic": "현재 이미지에서 확인되는 핵심 학습 주제",
+  "platform_or_product": "화면에서 확인되거나 강하게 뒷받침되는 제품/플랫폼/도메인 이름",
+  "topic_terms": ["현재 이미지 주제를 뒷받침하는 구체적 용어"],
   "caption": "이미지 1 - 문제 해결 서사에 필요한 구체적 캡션",
   "visible_evidence": ["화면에 보이는 단어, 값, 오류, 테이블, 수식"],
   "role": "problem | cause | solution | validation | final_result",
@@ -9340,6 +9455,8 @@ def build_image_evidence(
 - 이미지를 단순 설명하지 말고 문제/원인/해결/검증 역할로 분류합니다.
 - README_image_order.txt 내용이 있으면 caption source로 우선 사용합니다.
 - 원본 파일명에 01_Repeated_Category_Sales 같은 순서/의미가 있으면 그 의미를 caption에 반영합니다.
+- primary_topic과 platform_or_product는 이전 예제나 README가 아니라 현재 이미지에 보이는 UI, 제목, 수식, 고유 용어로만 판단합니다.
+- 제품명이 화면에 직접 보이지 않아도 여러 고유 용어가 한 제품/도메인을 강하게 지지할 때만 platform_or_product를 채웁니다. 확신이 없으면 빈 문자열로 둡니다.
 - 보이지 않는 수식, 성과, 배포는 만들지 않습니다.
 - JSON 배열만 반환합니다.
 
@@ -9371,7 +9488,7 @@ def build_image_evidence(
             completion = client.chat.completions.create(
                 model=GROQ_VISION_MODEL,
                 temperature=0.15,
-                max_tokens=4200,
+                max_tokens=GROQ_VISION_MAX_TOKENS,
                 messages=[
                     {"role": "system", "content": "You convert technical screenshots into grounded JSON ImageEvidence. Return JSON only."},
                     {"role": "user", "content": content_parts},
@@ -9381,7 +9498,10 @@ def build_image_evidence(
             if isinstance(data, list):
                 results.extend(normalize_image_evidence(data, start + 1))
         except Exception as exc:
+            llm_client.last_vision_error = exc
             print(f"[ImageEvidence error] {exc}")
+            if is_groq_rate_limit_error(exc):
+                break
 
     return results or fallback_image_evidence(image_files, image_names, raw_text, memo, caption_source)
 
@@ -10210,6 +10330,9 @@ def normalize_image_evidence(data: list[Any], start_no: int) -> list[dict[str, A
                 "image_no": index,
                 "display_image_index": index,
                 "source_image_no": item.get("image_no", index),
+                "primary_topic": str(item.get("primary_topic") or ""),
+                "platform_or_product": str(item.get("platform_or_product") or ""),
+                "topic_terms": normalize_str_list(item.get("topic_terms"))[:12],
                 "caption": humanize_caption(str(item.get("caption") or f"이미지 {index} - 실습 흐름 근거 화면"), index),
                 "visible_evidence": normalize_str_list(item.get("visible_evidence"))[:10],
                 "role": role,
@@ -11289,6 +11412,98 @@ def provider_failure_message(
 """
 
 
+def is_groq_rate_limit_error(exc: Exception | None) -> bool:
+    if exc is None:
+        return False
+    status_code = getattr(exc, "status_code", None)
+    message = str(exc).lower()
+    return status_code == 429 or "rate_limit_exceeded" in message or "rate limit reached" in message
+
+
+def groq_retry_details(exc: Exception) -> dict[str, Any]:
+    message = str(exc)
+    details: dict[str, Any] = {}
+    usage_match = re.search(
+        r"Limit\s+(\d+),\s*Used\s+(\d+),\s*Requested\s+(\d+)",
+        message,
+        flags=re.I,
+    )
+    if usage_match:
+        details["limit_tokens"] = int(usage_match.group(1))
+        details["used_tokens"] = int(usage_match.group(2))
+        details["requested_tokens"] = int(usage_match.group(3))
+
+    retry_match = re.search(
+        r"try again in\s*(?:(\d+(?:\.\d+)?)m)?\s*(?:(\d+(?:\.\d+)?)s)?",
+        message,
+        flags=re.I,
+    )
+    if retry_match:
+        minutes = float(retry_match.group(1) or 0)
+        seconds = float(retry_match.group(2) or 0)
+        total_seconds = max(1, int(minutes * 60 + seconds + 0.999))
+        details["retry_after_seconds"] = total_seconds
+        display_minutes, display_seconds = divmod(total_seconds, 60)
+        if display_minutes:
+            details["retry_after_display"] = f"약 {display_minutes}분 {display_seconds}초 후"
+        else:
+            details["retry_after_display"] = f"약 {display_seconds}초 후"
+    return details
+
+
+def vision_rate_limit_response(
+    exc: Exception,
+    image_count: int,
+    capture_count: int = 0,
+    qa_count: int = 0,
+) -> dict[str, Any]:
+    details = groq_retry_details(exc)
+    retry_display = str(details.get("retry_after_display") or "잠시 후")
+    usage_lines: list[str] = []
+    if details.get("used_tokens") is not None and details.get("limit_tokens") is not None:
+        usage_lines.append(f"- 현재 사용량: {details['used_tokens']:,} / {details['limit_tokens']:,} tokens")
+    if details.get("requested_tokens") is not None:
+        usage_lines.append(f"- 이번 요청 필요량: 약 {details['requested_tokens']:,} tokens")
+    usage_lines.append(f"- 재시도 권장: {retry_display}")
+    draft = f"""# 이미지 분석 사용량 한도 초과
+
+Groq Vision이 현재 사용량 한도에 도달해 이미지 내용을 판독하지 못했습니다. 이미지 근거 없이 fallback 글을 만들지 않았습니다.
+
+## 현재 상태
+{chr(10).join(usage_lines)}
+- 업로드된 이미지: {image_count}장
+- 저장된 캡처: {capture_count}개
+- 저장된 Q&A: {qa_count}개
+
+## 조치
+{retry_display} 같은 이미지를 다시 제출해 주세요. API 키나 가상환경을 다시 설정할 필요는 없습니다.
+"""
+    diagnostics = {
+        "provider": "groq",
+        "model": GROQ_VISION_MODEL,
+        "status_code": 429,
+        "failure_type": "vision_rate_limit",
+        **details,
+    }
+    return {
+        "draft": draft,
+        "article_type": "vision_rate_limit",
+        "image_evidence": [],
+        "problem_map": {},
+        "learning_evidence": [],
+        "decision_map": {},
+        "section_plan": [],
+        "article_brief": {},
+        "provider_diagnostics": diagnostics,
+        "critic_report": {
+            "passed": False,
+            "failures": ["Groq Vision rate limit exceeded"],
+            "metrics": {"failure_type": "vision_rate_limit", **details},
+        },
+        "mode": "vision_rate_limit",
+    }
+
+
 def parse_json_or_fallback(content: str, raw_text: str, memo: str) -> dict[str, Any]:
     cleaned = content.strip()
     if cleaned.startswith("```"):
@@ -12106,7 +12321,17 @@ class Handler(BaseHTTPRequestHandler):
                     result.update({"elapsed_seconds": elapsed, "image_count": len(image_files), "mode": "seed_article_mismatch"})
                     return self.json(result)
             result.update({"elapsed_seconds": elapsed, "image_count": len(image_files), "mode": "url_only_source_graph" if url_only_mode else "batch_upload", "run_id": url_run_id or direct_run_id})
-            result = apply_final_article_policy(result, current_text="\n".join([raw_text, memo, extra_info]), seed_url=seed_url, run_id=url_run_id or direct_run_id)
+            policy_context = "\n".join([raw_text, memo, extra_info])
+            image_context = ""
+            if image_files and not url_only_mode:
+                image_context = current_run_image_policy_context(result)
+            result = apply_final_article_policy(
+                result,
+                current_text=policy_context,
+                seed_url=seed_url,
+                run_id=url_run_id or direct_run_id,
+                contamination_context=image_context,
+            )
             return self.json(result)
         if url_only_mode:
             ok, reason = article_matches_seed_url(seed_url, str(result), current_text="\n".join([raw_text, memo, extra_info]))

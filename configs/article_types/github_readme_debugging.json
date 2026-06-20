@@ -1,0 +1,17 @@
+{
+  "article_type": "github_readme_debugging",
+  "required_entities": [
+    "GitHub",
+    "README",
+    "Markdown",
+    "asset path",
+    "preview",
+    "verification"
+  ],
+  "forbidden_cross_type_entities": [
+    "ProductKey",
+    "DAX",
+    "Power Query",
+    "Relationship"
+  ]
+}

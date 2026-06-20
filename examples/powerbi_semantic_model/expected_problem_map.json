@@ -1,0 +1,62 @@
+{
+  "article_type": "semantic_model_relationship",
+  "problem_kind": "repeated_value_anomaly",
+  "core_problem": "Category별 Sales 값이 모두 동일하게 반복되어 Product 차원 테이블의 filter context가 Sales fact table까지 전달되지 않는 문제가 드러남",
+  "why_problematic": "숫자는 보이지만 카테고리별로 달라져야 할 Sales 값이 동일하게 반복되면 전체 매출 총합이 각 행에 반복 표시되는 상태가 된다. 이는 visual 문제가 아니라 semantic model relationship 구조 문제로 봐야 한다.",
+  "root_causes": [
+    "Product와 Sales 사이 ProductKey relationship이 없거나 올바르게 작동하지 않음",
+    "Product dimension filter가 Sales fact table로 전달되지 않음",
+    "Salesperson 분석 단계에서 direct relationship과 bridge table 경로가 동시에 존재해 filter path가 모호해질 수 있음"
+  ],
+  "solution_steps": [
+    {
+      "step": 1,
+      "title": "반복되는 Sales 값을 문제 신호로 인식",
+      "problem": "Category별 Sales 값이 모두 동일하게 반복됨",
+      "cause": "Product[Category] filter가 Sales table까지 전달되지 않았을 가능성이 있음",
+      "action": "visual 문제가 아니라 Product-Sales relationship 문제로 정의",
+      "verification": "관계 설정 후 Category별 Sales 값이 다르게 분리되는지 확인"
+    },
+    {
+      "step": 2,
+      "title": "Product와 Sales를 ProductKey로 연결",
+      "problem": "Product 차원 정보와 Sales 거래 데이터가 독립적으로 존재함",
+      "cause": "dimension table과 fact table 사이 relationship이 없으면 category 기준 집계가 불가능함",
+      "action": "Product[ProductKey]에서 Sales[ProductKey]로 one-to-many relationship을 구성",
+      "verification": "Product Category 기준 Sales 집계가 정상적으로 분리되는지 확인"
+    },
+    {
+      "step": 3,
+      "title": "Star schema와 Product hierarchy 구성",
+      "problem": "제품 분석 단계를 체계적으로 탐색하기 어려움",
+      "cause": "Category, Subcategory, Product로 이어지는 hierarchy가 명확하지 않음",
+      "action": "Product hierarchy를 구성해 drill-down 가능한 분석 구조를 만듦",
+      "verification": "Category -> Subcategory -> Product 흐름으로 Sales를 탐색할 수 있는지 확인"
+    },
+    {
+      "step": 4,
+      "title": "Profit과 Profit Margin measure로 수익성 분석 확장",
+      "problem": "Sales 합계만으로는 수익성을 판단할 수 없음",
+      "cause": "cost와 revenue 차이를 계산하지 않으면 profit과 margin 분석이 불가능함",
+      "action": "Profit, Profit Margin measure를 구성",
+      "verification": "Category별 Sales, Profit, Profit Margin이 함께 비교되는지 확인"
+    },
+    {
+      "step": 5,
+      "title": "SalespersonRegion bridge table로 복잡한 관계 해결",
+      "problem": "Salesperson별 담당 Region 기준 Sales와 Target 비교가 단순 direct relationship만으로 어렵다",
+      "cause": "Salesperson, Region, Sales 사이에 bridge table과 filter direction 조정이 필요함",
+      "action": "SalespersonRegion bridge table을 사용하고 필요한 경우 direct relationship을 비활성화",
+      "verification": "Salesperson별 Sales, Target 비교가 의도한 기준으로 계산되는지 확인"
+    }
+  ],
+  "complex_problem": {
+    "title": "직접 relationship과 bridge table 경로가 동시에 존재할 때의 filter path 문제",
+    "symptom": "Salesperson 기준 분석에서 Sales와 Target을 함께 비교해야 하지만 담당 Region 기준 분석 흐름이 모호해짐",
+    "initial_assumption": "Salesperson과 Sales를 직접 연결하면 충분할 것처럼 보임",
+    "actual_cause": "담당 Region 기준 분석에는 Salesperson -> SalespersonRegion -> Region -> Sales 우회 filter path가 필요하며 direct relationship과 충돌할 수 있음",
+    "resolution": "Bridge table을 사용하고 relationship 활성/비활성 및 cross-filter direction을 조정",
+    "verification": "Salesperson별 Sales와 Target이 같은 분석 화면에서 비교되는지 확인"
+  },
+  "final_outcome": "반복되는 Sales 값 문제를 relationship/filter context 문제로 정의하고 semantic model 관계, hierarchy, DAX measure, bridge table을 통해 분석 가능한 모델로 개선함"
+}

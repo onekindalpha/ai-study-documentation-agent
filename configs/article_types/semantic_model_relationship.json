@@ -1,0 +1,20 @@
+{
+  "article_type": "semantic_model_relationship",
+  "required_entities": [
+    "Product[Category]",
+    "Sales[Sales]",
+    "Product[ProductKey] -> Sales[ProductKey]",
+    "One to many",
+    "Cross-filter direction",
+    "Star schema",
+    "Product hierarchy",
+    "Profit",
+    "Profit Margin",
+    "DIVIDE",
+    "SalespersonRegion",
+    "Bridge table",
+    "inactive relationship",
+    "Targets"
+  ],
+  "forbidden_cross_type_entities": []
+}

@@ -1,0 +1,17 @@
+{
+  "article_type": "python_algorithm_learning",
+  "required_entities": [
+    "Python",
+    "algorithm",
+    "input",
+    "output",
+    "edge case",
+    "time complexity"
+  ],
+  "forbidden_cross_type_entities": [
+    "ProductKey",
+    "DAX",
+    "Power Query",
+    "SalespersonRegion"
+  ]
+}

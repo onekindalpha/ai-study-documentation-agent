@@ -1,0 +1,19 @@
+{
+  "article_type": "power_query_etl",
+  "required_entities": [
+    "Power Query Editor",
+    "Transform Data",
+    "Column quality",
+    "data quality",
+    "null",
+    "Replace Values",
+    "Custom Column",
+    "data type",
+    "Merge",
+    "Append",
+    "Unpivot",
+    "load",
+    "verification"
+  ],
+  "forbidden_cross_type_entities": []
+}

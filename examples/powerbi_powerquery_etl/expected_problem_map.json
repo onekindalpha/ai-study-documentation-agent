@@ -1,0 +1,64 @@
+{
+  "article_type": "power_query_etl",
+  "problem_kind": "transformation_requirement",
+  "core_problem": "원본 데이터가 보고서 작성에 바로 사용할 수 있는 분석 모델 형태가 아니어서 data quality, column cleanup, null cost 보완, unpivot, merge, load control을 정리해야 했다.",
+  "why_problematic": "원본 데이터에 불필요한 컬럼, 중첩된 관련 테이블, 비표준 값, null 원가, wide format 월별 목표값이 남아 있으면 이후 모델링과 시각화에서 잘못된 집계나 해석 오류가 발생할 수 있다.",
+  "root_causes": [
+    "SQL Server와 CSV 원본 데이터가 분석 목적에 맞게 정리되지 않음",
+    "BusinessType 값에 Ware House / Warehouse처럼 같은 의미의 값이 다르게 입력됨",
+    "TotalProductCost null 값이 원가와 이익 분석을 왜곡할 수 있음",
+    "Targets 데이터가 M01~M12 wide format이라 날짜 기반 분석에 부적합함",
+    "ColorFormats는 Product에 merge해야 하지만 독립 분석 테이블로 load할 필요는 없음"
+  ],
+  "solution_steps": [
+    {
+      "step": 1,
+      "title": "Column quality, distribution, profile로 데이터 품질 확인",
+      "problem": "데이터를 바로 모델에 올리면 결측값이나 이상 분포를 놓칠 수 있음",
+      "cause": "원본 데이터 품질을 확인하지 않으면 이후 계산 결과가 왜곡될 수 있음",
+      "action": "Column quality, Column distribution, Column profile을 사용해 데이터 상태를 확인",
+      "verification": "컬럼별 null, distinct, valid 비율을 확인"
+    },
+    {
+      "step": 2,
+      "title": "Ware House 값을 Warehouse로 표준화",
+      "problem": "같은 의미의 BusinessType 값이 다르게 입력되어 category가 분리될 수 있음",
+      "cause": "Ware House와 Warehouse가 서로 다른 값으로 존재함",
+      "action": "Replace Values로 Ware House를 Warehouse로 통일",
+      "verification": "BusinessType 집계에서 동일 의미 값이 하나의 category로 묶이는지 확인"
+    },
+    {
+      "step": 3,
+      "title": "TotalProductCost null 값을 계산식으로 보완",
+      "problem": "TotalProductCost가 null이면 원가와 이익 분석이 왜곡될 수 있음",
+      "cause": "일부 거래 데이터에 원가 값이 비어 있음",
+      "action": "OrderQuantity x StandardCost로 TotalProductCost를 보완",
+      "verification": "null 원가가 계산 가능한 값으로 채워졌는지 확인"
+    },
+    {
+      "step": 4,
+      "title": "Targets M01~M12 컬럼을 Unpivot",
+      "problem": "월별 목표값이 M01~M12 가로 컬럼으로 퍼져 있어 날짜 기반 분석에 부적합함",
+      "cause": "wide format보다 MonthNumber/Target long format이 Power BI 모델링에 적합함",
+      "action": "M01~M12 컬럼을 Unpivot하여 MonthNumber와 Target 구조로 변환",
+      "verification": "월별 목표값이 행 단위로 정리되어 날짜/월 기준 분석에 연결 가능한지 확인"
+    },
+    {
+      "step": 5,
+      "title": "ColorFormats를 Product에 Merge하고 보조 쿼리 load 제외",
+      "problem": "색상 포맷 정보는 Product에 붙여야 하지만 별도 분석 테이블로 load할 필요는 없음",
+      "cause": "보조 매핑 테이블까지 모델에 load하면 모델이 불필요하게 복잡해질 수 있음",
+      "action": "ColorFormats를 Product에 Left Outer Merge하고 ColorFormats 자체는 load 비활성화",
+      "verification": "Product에는 색상 정보가 붙고 최종 모델에는 필요한 분석 테이블만 load되는지 확인"
+    }
+  ],
+  "complex_problem": {
+    "title": "결측 원가 보완과 월별 목표 데이터 Unpivot",
+    "symptom": "TotalProductCost null 값과 M01~M12 wide format Targets 데이터가 원가/목표 분석을 어렵게 만듦",
+    "initial_assumption": "원본 데이터를 그대로 불러와도 분석에 사용할 수 있을 것처럼 보임",
+    "actual_cause": "원가 결측은 이익 계산을 왜곡하고 월이 컬럼명으로 들어간 구조는 날짜 기반 filtering과 DAX 계산에 부적합함",
+    "resolution": "TotalProductCost는 OrderQuantity x StandardCost로 보완하고 Targets는 Unpivot으로 long format 변환",
+    "verification": "원가 분석과 월별 목표 분석에 사용할 수 있는 데이터 구조가 만들어졌는지 확인"
+  },
+  "final_outcome": "원본 데이터를 단순히 불러오는 수준을 넘어 보고서 작성과 모델링에 적합한 분석 테이블 구조로 정리하고 최종 load 범위를 제어함"
+}

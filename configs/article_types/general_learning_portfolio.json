@@ -1,0 +1,10 @@
+{
+  "article_type": "general_learning_portfolio",
+  "required_entities": [
+    "problem",
+    "cause",
+    "action",
+    "verification"
+  ],
+  "forbidden_cross_type_entities": []
+}

@@ -1,0 +1,16 @@
+{
+  "article_type": "code_error_debugging",
+  "required_entities": [
+    "error",
+    "stack trace",
+    "root cause",
+    "fix",
+    "verification"
+  ],
+  "forbidden_cross_type_entities": [
+    "ProductKey",
+    "DAX",
+    "Power Query",
+    "SalespersonRegion"
+  ]
+}

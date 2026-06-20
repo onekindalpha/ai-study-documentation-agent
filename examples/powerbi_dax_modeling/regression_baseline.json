@@ -1,0 +1,38 @@
+{
+  "baseline_type": "plan_to_article_quality_gate",
+  "article_type": "dax_measure_modeling",
+  "title": "Power BI DAX 실습: 날짜 테이블, Measure, Target, Variance로 분석 모델 완성하기",
+  "image_evidence_count": 9,
+  "minimum_solution_steps": 10,
+  "section_plan_count": 10,
+  "core_problem_must_include": [
+    "MonthKey",
+    "Date table",
+    "explicit measure",
+    "Target",
+    "Variance"
+  ],
+  "must_preserve_flow": [
+    "Month sort by MonthKey",
+    "Fiscal Date table",
+    "Date model relationship",
+    "Mark as date table",
+    "Avg Price",
+    "Median Price",
+    "Orders",
+    "Currency format",
+    "TargetAmount",
+    "HASONEVALUE",
+    "Sales",
+    "Variance",
+    "Variance Margin",
+    "Salesperson final comparison"
+  ],
+  "forbidden_phrases": [
+    "Vision 판독 실패",
+    "파일명과 입력 메모만 근거로 사용",
+    "정리해야 했다.로 정의되었다",
+    "정리해야 했다.."
+  ],
+  "quality_notes": "Use this as a regression quality gate. Preserve the DAX plan and measure rationale without copying golden article prose."
+}

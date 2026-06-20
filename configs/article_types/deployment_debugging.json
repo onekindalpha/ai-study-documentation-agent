@@ -1,0 +1,16 @@
+{
+  "article_type": "deployment_debugging",
+  "required_entities": [
+    "deployment",
+    "build log",
+    "environment variable",
+    "server",
+    "verification"
+  ],
+  "forbidden_cross_type_entities": [
+    "ProductKey",
+    "DAX",
+    "Power Query",
+    "Star schema"
+  ]
+}

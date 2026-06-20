@@ -1,0 +1,43 @@
+{
+  "baseline_type": "plan_to_article_quality_gate",
+  "article_type": "power_query_etl",
+  "title": "Power BI Desktop 실습: 원본 데이터를 분석 가능한 모델 입력 구조로 정리·변환·로드하기",
+  "image_evidence_count": 14,
+  "minimum_solution_steps": 12,
+  "section_plan_count": 12,
+  "core_problem_must_include": [
+    "SQL Server",
+    "CSV",
+    "분석 모델",
+    "정리",
+    "변환",
+    "로드"
+  ],
+  "must_preserve_flow": [
+    "SQL Server and CSV import",
+    "Column quality",
+    "Column distribution",
+    "Column profile",
+    "SalesPersonFlag",
+    "Product expansion",
+    "BusinessType",
+    "Ware House",
+    "TotalProductCost",
+    "Custom Column",
+    "Unpivot",
+    "TargetMonth",
+    "ColorFormats",
+    "Left Outer",
+    "Disable load",
+    "Close & Apply",
+    "7개 테이블"
+  ],
+  "forbidden_phrases": [
+    "정리해야 했다.로 정의되었다",
+    "정리해야 했다..",
+    "study capture, technical evidence",
+    "Vision 판독 실패",
+    "파일명과 입력 메모만 근거로 사용"
+  ],
+  "quality_notes": "Use this as a regression quality gate. Preserve the ETL plan and Power Query code rationale without copying golden article prose."
+}

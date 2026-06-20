@@ -3,5 +3,12 @@
 __pycache__/
 *.pyc
 data/captures/*
+data/runs/
+data/source_packs/
 data/notes.jsonl
+data/sessions.json
 !data/captures/.gitkeep
+*.zip
+*.orig
+*.rej
+*.before_*
