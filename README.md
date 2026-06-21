@@ -6,6 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 pinned: false
+short_description: AI agent for study notes from URLs and images.
 ---
 
 # Study Documentation Automation Ai Agent
