@@ -13219,6 +13219,12 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def do_HEAD(self) -> None:
+        """Allow Hugging Face / proxy readiness checks to succeed."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
     def json(self, data: Any) -> None:
         try:
             obj = scc_force_url_topic_article_if_needed(obj, '', '')
