@@ -12,7 +12,7 @@ The project focuses on the flow from **study evidence** to **context reconstruct
 
 ## Demo
 
-- Live Demo: https://huggingface.co/spaces/onekindalpha/ai-study-documentation-agent
+- Live Demo: https://onekindalpha-study-documentation-ai-agent.hf.space/
 
 ## Overview
 
