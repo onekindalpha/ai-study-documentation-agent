@@ -2730,6 +2730,37 @@ def is_generic_youtube_title(title: str) -> bool:
     )
 
 
+def is_noise_learning_keyword(token: str) -> bool:
+    value = str(token or "").strip()
+    lower = value.lower()
+    if not value:
+        return True
+    # YouTube video IDs are not learning concepts.
+    if re.fullmatch(r"[A-Za-z0-9_-]{10,12}", value) and any(ch.isdigit() for ch in value):
+        return True
+    noise = {
+        "youtube", "video", "영상", "링크", "메모", "학습", "기록", "주제",
+        "헷갈렸음", "헷갈림", "차이", "차이가", "구분", "기준", "흐름",
+        "current", "title", "metadata", "memo", "url"
+    }
+    return lower in noise or value in noise
+
+
+def clean_learning_keywords(tokens: list[str], limit: int = 10) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        token = str(token or "").strip()
+        key = token.lower()
+        if is_noise_learning_keyword(token) or key in seen:
+            continue
+        seen.add(key)
+        out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def fetch_youtube_title_for_url(seed_url: str, timeout_sec: int = 12) -> str:
     # Best-effort title fetch for URL-only YouTube fallback.
     # General, not video-specific: yt-dlp metadata -> YouTube oEmbed -> empty.
@@ -2820,12 +2851,14 @@ def extract_compact_keywords_from_title_memo(title: str, memo: str, limit: int =
         key = token.lower().strip("-_/")
         if len(key) < 2 or key in stop:
             continue
+        if is_noise_learning_keyword(token):
+            continue
         if key not in seen:
             seen.add(key)
             out.append(token)
         if len(out) >= limit:
             break
-    return out
+    return clean_learning_keywords(out, limit=limit)
 
 
 def infer_url_title_topic_profile(title: str, memo: str) -> dict[str, Any]:
@@ -2839,7 +2872,7 @@ def infer_url_title_topic_profile(title: str, memo: str) -> dict[str, Any]:
         return {
             "topic": "Docker",
             "focus": "image와 container의 역할 및 build/run 경계",
-            "concepts": unique_preserve_order(keywords + ["Docker image", "container", "Dockerfile", "build", "run", "layer"], limit=10),
+            "concepts": ["Docker image", "container", "Dockerfile", "docker build", "docker run", "image layer", "port mapping", "volume"],
             "flow": "Dockerfile 작성 → image build → container 실행 → 로그/포트/상태 확인",
             "checks": [
                 "image는 실행 템플릿이고 container는 실행 중인 인스턴스라는 차이를 설명할 수 있는가",
@@ -2851,7 +2884,7 @@ def infer_url_title_topic_profile(title: str, memo: str) -> dict[str, Any]:
         return {
             "topic": "API",
             "focus": "request와 response가 endpoint를 기준으로 오가는 흐름",
-            "concepts": unique_preserve_order(keywords + ["endpoint", "request", "response", "status code", "schema"], limit=10),
+            "concepts": ["endpoint", "request", "response", "status code", "request body", "query parameter", "schema", "validation"],
             "flow": "client request → endpoint 처리 → validation/business logic → response 반환 → status/body 확인",
             "checks": [
                 "요청 데이터가 path/query/body 중 어디에 들어가는지 구분할 수 있는가",
@@ -2902,6 +2935,10 @@ def build_youtube_url_title_fallback_draft(seed_url: str, run_id: str, collector
     # This is not per-video cache and does not pretend to have transcript text.
     title = youtube_title_from_report_or_url(seed_url, collector_report)
     memo_clean = str(memo or "").strip()
+    title_available = not is_generic_youtube_title(title)
+    title_label = title if title_available else "입력한 YouTube 링크"
+    title_meta_line = title if title_available else "자동 확인 실패"
+    source_basis_label = "YouTube URL, 영상 제목 메타데이터, 사용자 메모" if title_available else "YouTube URL과 사용자 메모"
     profile = infer_url_title_topic_profile(title, memo_clean)
     topic = str(profile.get("topic") or "YouTube 학습")
     focus = str(profile.get("focus") or memo_clean or title)
@@ -2921,11 +2958,11 @@ def build_youtube_url_title_fallback_draft(seed_url: str, run_id: str, collector
 _YouTube transcript was not programmatically accessible in this HF run, so this draft uses the current YouTube URL, video title metadata, and user memo as the available learning context._
 
 ## 짧은 도입부
-이번 학습에서는 `{title}` 링크를 기준으로, 사용자가 남긴 문제의식을 기술 학습 기록으로 정리했다. 자막 본문을 직접 인용하지는 못했기 때문에 영상 내용을 단정적으로 요약하지 않고, 현재 URL에서 확인한 제목과 메모를 바탕으로 개념 경계, 적용 흐름, 검증 기준을 구성했다.
+이번 학습에서는 `{title_label}`를 기준으로, 사용자가 남긴 문제의식을 기술 학습 기록으로 정리했다. 자막 본문을 직접 인용하지는 못했기 때문에 영상 내용을 단정적으로 요약하지 않고, 현재 URL에서 확인한 제목과 메모를 바탕으로 개념 경계, 적용 흐름, 검증 기준을 구성했다.
 
 ## 핵심 작업 요약
 - 핵심 문제: {focus}
-- 학습 자료: YouTube URL, 영상 제목 메타데이터, 사용자 메모
+- 학습 자료: {source_basis_label}
 - 참고 URL: {seed_url}
 - 학습 범위: {concept_inline}
 - 핵심 흐름: {flow}
@@ -2933,11 +2970,11 @@ _YouTube transcript was not programmatically accessible in this HF run, so this 
 
 ## 참고한 자료
 - {seed_url}
-- 영상 제목: {title}
+- 영상 제목: {title_meta_line}
 - run_id: {run_id}
 
 ## 수집 제한
-이번 실행에서는 YouTube transcript/caption 본문을 프로그램으로 읽지 못했다. 따라서 아래 내용은 자막 직접 인용 기반 요약이 아니라, 현재 URL의 제목 정보와 사용자 메모를 바탕으로 만든 학습 초안이다. 자막이 수집되는 영상에서는 본문 근거가 더 많이 포함된다.
+이번 실행에서는 YouTube transcript/caption 본문을 프로그램으로 읽지 못했다. 따라서 아래 내용은 자막 직접 인용 기반 요약이 아니라, 현재 URL과 사용자 메모에서 확인 가능한 정보를 바탕으로 만든 학습 초안이다. 자막이 수집되는 영상에서는 본문 근거가 더 많이 포함된다.
 
 ## 문제 인식
 이번 학습에서 막힌 지점은 `{focus}`였다. 영상을 보는 것 자체보다 중요한 것은, 내가 어떤 개념을 헷갈렸고 그 차이를 어떤 기준으로 다시 설명할 수 있는지 남기는 것이었다.
@@ -2986,7 +3023,7 @@ This draft keeps YouTube link-based generation usable on HF by using the current
 
 ## Key skills practiced
 - 현재 입력 기반 학습 문제 정의
-- 영상 제목/메모 기반 개념 경계 정리
+- URL/메모 기반 개념 경계 정리
 - 적용 흐름 재구성
 - 검증 질문 설정
 - YouTube URL 기반 초안 생성
