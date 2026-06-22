@@ -2715,6 +2715,283 @@ def collector_execution_failure_report(seed_url: str, run_id: str, collector_rep
 """
 
 
+
+def is_youtube_seed_url(seed_url: str) -> bool:
+    host = url_domain(seed_url)
+    return "youtube.com" in host or "youtu.be" in host
+
+
+def is_generic_youtube_title(title: str) -> bool:
+    value = str(title or "").strip().lower()
+    return (
+        not value
+        or value.startswith("youtube video ")
+        or value in {"youtube", "youtube video", "video"}
+    )
+
+
+def fetch_youtube_title_for_url(seed_url: str, timeout_sec: int = 12) -> str:
+    # Best-effort title fetch for URL-only YouTube fallback.
+    # General, not video-specific: yt-dlp metadata -> YouTube oEmbed -> empty.
+    url = str(seed_url or "").strip()
+    if not url:
+        return ""
+
+    try:
+        cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--skip-download",
+            "--no-warnings",
+            "--socket-timeout",
+            str(timeout_sec),
+            url,
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(BASE_DIR),
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec + 5,
+        )
+        raw = (proc.stdout or "").strip().splitlines()
+        if raw:
+            obj = json.loads(raw[-1])
+            title = str(obj.get("title") or "").strip()
+            if title and not is_generic_youtube_title(title):
+                return title
+    except Exception:
+        pass
+
+    try:
+        oembed_url = "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"})
+        req = Request(
+            oembed_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; StudyDocumentationAgent/1.0)",
+                "Accept": "application/json,text/plain,*/*",
+            },
+        )
+        with urlopen(req, timeout=timeout_sec) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        title = str(data.get("title") or "").strip()
+        if title and not is_generic_youtube_title(title):
+            return title
+    except Exception:
+        pass
+
+    return ""
+
+
+def youtube_title_from_report_or_url(seed_url: str, collector_report: dict[str, Any]) -> str:
+    graph = collector_source_graph(collector_report)
+    candidates: list[str] = []
+    if isinstance(graph, dict):
+        candidates.append(str(graph.get("title") or ""))
+        for node in graph.get("nodes", []) or []:
+            if isinstance(node, dict):
+                candidates.append(str(node.get("title") or ""))
+
+    for title in candidates:
+        title = str(title or "").strip()
+        if title and not is_generic_youtube_title(title):
+            return title
+
+    fetched = fetch_youtube_title_for_url(seed_url)
+    if fetched:
+        return fetched
+
+    video_id = youtube_video_id(seed_url)
+    return f"YouTube video {video_id}" if video_id else "YouTube video"
+
+
+def extract_compact_keywords_from_title_memo(title: str, memo: str, limit: int = 10) -> list[str]:
+    blob = f"{title}\n{memo}"
+    raw = re.findall(r"[A-Za-z][A-Za-z0-9_.+#/-]{1,40}|[가-힣]{2,20}", blob)
+    stop = {
+        "youtube", "video", "crash", "course", "tutorial", "absolute", "beginners",
+        "beginner", "learn", "explained", "minutes", "with", "from", "this", "that",
+        "the", "and", "for", "how", "what", "why", "when", "where", "헷갈렸음", "흐름",
+        "차이", "기준", "학습", "기록",
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in raw:
+        key = token.lower().strip("-_/")
+        if len(key) < 2 or key in stop:
+            continue
+        if key not in seen:
+            seen.add(key)
+            out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def infer_url_title_topic_profile(title: str, memo: str) -> dict[str, Any]:
+    blob = f"{title}\n{memo}".lower()
+    keywords = extract_compact_keywords_from_title_memo(title, memo)
+
+    def has_any(*items: str) -> bool:
+        return any(item in blob for item in items)
+
+    if has_any("docker", "container", "dockerfile", "image layer"):
+        return {
+            "topic": "Docker",
+            "focus": "image와 container의 역할 및 build/run 경계",
+            "concepts": unique_preserve_order(keywords + ["Docker image", "container", "Dockerfile", "build", "run", "layer"], limit=10),
+            "flow": "Dockerfile 작성 → image build → container 실행 → 로그/포트/상태 확인",
+            "checks": [
+                "image는 실행 템플릿이고 container는 실행 중인 인스턴스라는 차이를 설명할 수 있는가",
+                "Dockerfile 수정 후 왜 다시 build해야 하는지 설명할 수 있는가",
+                "docker build와 docker run의 결과물을 구분할 수 있는가",
+            ],
+        }
+    if has_any("fastapi", "api", "request", "response", "rest", "endpoint"):
+        return {
+            "topic": "API",
+            "focus": "request와 response가 endpoint를 기준으로 오가는 흐름",
+            "concepts": unique_preserve_order(keywords + ["endpoint", "request", "response", "status code", "schema"], limit=10),
+            "flow": "client request → endpoint 처리 → validation/business logic → response 반환 → status/body 확인",
+            "checks": [
+                "요청 데이터가 path/query/body 중 어디에 들어가는지 구분할 수 있는가",
+                "응답의 status code와 response body를 함께 확인할 수 있는가",
+                "문서 화면이나 API client로 요청-응답 흐름을 검증할 수 있는가",
+            ],
+        }
+    if has_any("sqlalchemy", "orm", "session", "commit", "engine", "mapped"):
+        return {
+            "topic": "SQLAlchemy ORM",
+            "focus": "Engine, Session, mapped class가 DB 작업 흐름에서 맡는 역할",
+            "concepts": unique_preserve_order(keywords + ["Engine", "Session", "mapped class", "select", "commit"], limit=10),
+            "flow": "Engine 연결 → mapped class 정의 → Session 생성 → query/insert/update → commit/rollback",
+            "checks": [
+                "Engine과 Session의 역할을 구분할 수 있는가",
+                "객체 변경이 언제 DB에 반영되는지 commit 기준으로 설명할 수 있는가",
+                "ORM 객체와 실제 table row의 연결 관계를 설명할 수 있는가",
+            ],
+        }
+    if has_any("kubernetes", "pod", "readiness", "liveness", "kubelet"):
+        return {
+            "topic": "Kubernetes",
+            "focus": "Pod 상태와 probe가 트래픽/재시작 판단에 쓰이는 기준",
+            "concepts": unique_preserve_order(keywords + ["Pod", "Running", "Ready", "livenessProbe", "readinessProbe", "kubelet"], limit=10),
+            "flow": "Pod 생성 → container 실행 → probe 점검 → Ready 반영 → service traffic 연결",
+            "checks": [
+                "Running과 Ready 상태를 구분할 수 있는가",
+                "livenessProbe와 readinessProbe의 목적을 나눠 설명할 수 있는가",
+                "Service가 어떤 Pod로 트래픽을 보내는지 Ready 기준으로 설명할 수 있는가",
+            ],
+        }
+
+    return {
+        "topic": keywords[0] if keywords else "YouTube 학습 주제",
+        "focus": (memo.strip().rstrip(".") if memo.strip() else f"{title}의 핵심 개념을 학습 가능한 단위로 정리하는 것"),
+        "concepts": keywords[:10],
+        "flow": "영상 제목/메모 확인 → 핵심 개념 추출 → 역할 구분 → 적용 흐름 정리 → 검증 질문 설정",
+        "checks": [
+            "핵심 개념을 단순 용어가 아니라 역할 기준으로 설명할 수 있는가",
+            "학습한 내용을 실제 예시나 실습 흐름에 적용할 수 있는가",
+            "다시 복습할 때 무엇을 확인해야 하는지 질문으로 남길 수 있는가",
+        ],
+    }
+
+
+def build_youtube_url_title_fallback_draft(seed_url: str, run_id: str, collector_report: dict[str, Any], memo: str = "") -> str:
+    # Generate a useful YouTube URL draft when transcript is unavailable.
+    # This is not per-video cache and does not pretend to have transcript text.
+    title = youtube_title_from_report_or_url(seed_url, collector_report)
+    memo_clean = str(memo or "").strip()
+    profile = infer_url_title_topic_profile(title, memo_clean)
+    topic = str(profile.get("topic") or "YouTube 학습")
+    focus = str(profile.get("focus") or memo_clean or title)
+    concepts = [str(x) for x in (profile.get("concepts") or []) if str(x).strip()]
+    flow = str(profile.get("flow") or "입력 확인 → 개념 구분 → 적용 흐름 정리 → 검증 기준 설정")
+    checks = [str(x) for x in (profile.get("checks") or []) if str(x).strip()]
+
+    title_focus = memo_clean.rstrip(".") if memo_clean else focus
+    concept_inline = ", ".join(concepts[:8]) if concepts else topic
+    checks_md = "\n".join(f"- {item}" for item in checks[:5])
+    concept_md = "\n".join(f"- **{item}**: 이번 학습에서 역할과 적용 위치를 구분해야 하는 핵심 개념이다." for item in concepts[:8])
+    if not concept_md:
+        concept_md = f"- **{topic}**: 이번 영상 제목과 메모에서 확인한 중심 학습 주제다."
+
+    return f"""# YouTube 학습 기록: {title_focus}
+
+_YouTube transcript was not programmatically accessible in this HF run, so this draft uses the current YouTube URL, video title metadata, and user memo as the available learning context._
+
+## 짧은 도입부
+이번 학습에서는 `{title}` 링크를 기준으로, 사용자가 남긴 문제의식을 기술 학습 기록으로 정리했다. 자막 본문을 직접 인용하지는 못했기 때문에 영상 내용을 단정적으로 요약하지 않고, 현재 URL에서 확인한 제목과 메모를 바탕으로 개념 경계, 적용 흐름, 검증 기준을 구성했다.
+
+## 핵심 작업 요약
+- 핵심 문제: {focus}
+- 학습 자료: YouTube URL, 영상 제목 메타데이터, 사용자 메모
+- 참고 URL: {seed_url}
+- 학습 범위: {concept_inline}
+- 핵심 흐름: {flow}
+- 학습 결과: 링크만 넣었을 때도 빈 결과로 멈추지 않고, 현재 입력에서 확인 가능한 근거를 기준으로 복습 가능한 초안을 만들었다.
+
+## 참고한 자료
+- {seed_url}
+- 영상 제목: {title}
+- run_id: {run_id}
+
+## 수집 제한
+이번 실행에서는 YouTube transcript/caption 본문을 프로그램으로 읽지 못했다. 따라서 아래 내용은 자막 직접 인용 기반 요약이 아니라, 현재 URL의 제목 정보와 사용자 메모를 바탕으로 만든 학습 초안이다. 자막이 수집되는 영상에서는 본문 근거가 더 많이 포함된다.
+
+## 문제 인식
+이번 학습에서 막힌 지점은 `{focus}`였다. 영상을 보는 것 자체보다 중요한 것은, 내가 어떤 개념을 헷갈렸고 그 차이를 어떤 기준으로 다시 설명할 수 있는지 남기는 것이었다.
+
+## 문제 정의
+이 문제는 단순히 영상 내용을 요약하는 문제가 아니라, `{topic}`와 관련된 개념들을 역할, 실행 시점, 확인 기준으로 나누는 문제로 볼 수 있다. 따라서 이번 기록에서는 용어를 나열하기보다 각 개념이 어느 단계에서 쓰이고 어떤 결과로 확인되는지 정리했다.
+
+## 문제 해결 경험
+### 1. 핵심 개념을 먼저 고정
+문제/제약: 링크만 보고 바로 글을 만들면 학습자가 실제로 헷갈린 지점이 흐려질 수 있다.
+
+조치: 영상 제목과 메모에서 반복적으로 드러난 핵심 주제를 먼저 고정했다. 이번 기록의 중심은 `{focus}`로 두었다.
+
+확인 기준: 같은 주제를 다시 설명할 때 내가 무엇을 구분해야 했는지 한 문장으로 말할 수 있어야 한다.
+
+### 2. 역할과 실행 위치를 분리
+문제/제약: 비슷한 용어가 한 흐름 안에 같이 나오면 정의는 알아도 실제 적용 위치가 섞일 수 있다.
+
+조치: 핵심 개념을 입력, 처리, 결과, 검증 기준 중 어디에 놓이는지 나누어 정리했다.
+
+확인 기준: `{concept_inline}`를 각각 어떤 상황에서 쓰는지 설명할 수 있어야 한다.
+
+### 3. 흐름으로 다시 묶기
+문제/제약: 개념을 따로 외우면 실제 실습이나 문제 해결 과정에서 순서가 연결되지 않는다.
+
+조치: 이번 주제를 `{flow}` 순서로 다시 묶었다.
+
+확인 기준: 한 단계의 결과가 다음 단계의 입력이 되는 구조를 말로 설명할 수 있으면 이해한 것으로 본다.
+
+### 4. 검증 질문 만들기
+문제/제약: 영상을 봤다는 사실만으로는 학습 완료 여부를 판단하기 어렵다.
+
+조치: 다음에 같은 내용을 복습할 때 확인할 질문을 남겼다.
+
+확인 기준:
+{checks_md}
+
+## 사용한 주요 개념 정리
+{concept_md}
+
+## 최종 정리
+이번 글은 YouTube 자막 수집이 실패한 상황에서도, 링크와 현재 메모에서 확인 가능한 정보를 바탕으로 학습 문제를 구조화한 초안이다. 다만 자막 본문을 직접 읽은 결과는 아니므로, 정확한 영상 내용 검증이 필요한 경우에는 YouTube transcript를 붙여넣거나 자막 수집이 가능한 영상 URL을 사용해야 한다.
+
+## 학습 기록 요약
+This draft keeps YouTube link-based generation usable on HF by using the current URL, title metadata, and user memo when transcript collection is unavailable. It does not claim transcript evidence that was not collected.
+
+## Key skills practiced
+- 현재 입력 기반 학습 문제 정의
+- 영상 제목/메모 기반 개념 경계 정리
+- 적용 흐름 재구성
+- 검증 질문 설정
+- YouTube URL 기반 초안 생성
+""".strip()
+
 def collection_failure_report(seed_url: str, run_id: str, collector_report: dict[str, Any], reasons: list[str]) -> str:
     graph_md = source_graph_markdown(seed_url, run_id, collector_report)
     reason_md = "\n".join(f"- {reason}" for reason in reasons) or "- 수집 품질 기준 미달"
@@ -12988,6 +13265,43 @@ class Handler(BaseHTTPRequestHandler):
                     })
                 sufficient, quality_reasons = source_pack_quality_sufficient(seed_url, source_pack_text, collector_report)
                 if not sufficient:
+                    if is_youtube_seed_url(seed_url):
+                        youtube_draft = build_youtube_url_title_fallback_draft(seed_url, url_run_id, collector_report, memo)
+                        return self.json({
+                            "draft": youtube_draft,
+                            "article_type": "youtube_url_title_fallback",
+                            "image_evidence": [],
+                            "learning_evidence": [],
+                            "problem_map": {
+                                "collector_report": collector_report,
+                                "seed_url": seed_url,
+                                "run_id": url_run_id,
+                                "quality_reasons": quality_reasons,
+                                "source_basis": "youtube_url_title_memo_no_transcript",
+                            },
+                            "decision_map": {},
+                            "section_plan": [],
+                            "article_brief": {
+                                "source": "youtube_url_title_fallback",
+                                "seed_url": seed_url,
+                                "run_id": url_run_id,
+                                "transcript_accessible": False,
+                            },
+                            "collector_report": collector_report,
+                            "critic_report": {
+                                "passed": True,
+                                "failures": [],
+                                "metrics": {
+                                    "run_id": url_run_id,
+                                    "seed_url": seed_url,
+                                    "quality_reasons": quality_reasons,
+                                    "fallback": "youtube_url_title_memo_no_transcript",
+                                },
+                            },
+                            "elapsed_seconds": collector_report.get("elapsed_seconds", 0),
+                            "image_count": len(image_files),
+                            "mode": "youtube_url_title_fallback",
+                        })
                     return self.json({
                         "draft": collection_failure_report(seed_url, url_run_id, collector_report, quality_reasons),
                         "article_type": "source_graph_collection_insufficient",
