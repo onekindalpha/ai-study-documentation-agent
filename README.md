@@ -1,14 +1,3 @@
----
-title: Study Documentation Automation AI Agent
-emoji: 📝
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: AI agent for study notes from URLs and images.
----
-
 # Study Documentation Automation Ai Agent
 
 **Language:** English | [한국어](./README.ko.md)
@@ -25,6 +14,7 @@ The project focuses on the flow from **study evidence** to **context reconstruct
 
 - Live Demo: https://huggingface.co/spaces/onekindalpha/study-documentation-ai-agent
 - Guided Demo (29 seconds): [Watch the English-captioned workflow](./assets/demo/study-documentation-ai-agent-guided-demo.mp4)
+https://github.com/user-attachments/assets/1af3dd29-a7b9-49ec-b49d-a37b8e9443b2
 
 The guided video shows how to add a learning source, start article generation, wait for source collection and analysis, review the generated Markdown, and prepare the learning record for blog publishing.
 
